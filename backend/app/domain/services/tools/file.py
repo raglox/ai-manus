@@ -2,15 +2,19 @@ from typing import Optional, Dict, Any
 from app.domain.external.sandbox import Sandbox
 from app.domain.services.tools.base import tool, BaseTool
 from app.domain.models.tool_result import ToolResult
+from app.infrastructure.loggers import logger
 import os
+import json
 
 class FileTool(BaseTool):
-    """File tool class, providing file operation functions
+    """File tool class using OpenHands SDK file_editor
     
     Enhanced with:
+    - OpenHands SDK file_editor for advanced editing capabilities
     - Excel/CSV analysis using pandas
     - PDF text and table extraction
     - Smart file detection and processing
+    - Stateful session support
     """
 
     name: str = "file"
@@ -25,172 +29,168 @@ class FileTool(BaseTool):
         self.sandbox = sandbox
         
     @tool(
-        name="file_read",
-        description="Read file content. Use for checking file contents, analyzing logs, or reading configuration files.",
+        name="file_view",
+        description="View file content with line numbers. Perfect for reading code, configs, or logs. Uses OpenHands file_editor for consistent behavior.",
         parameters={
-            "file": {
+            "path": {
                 "type": "string",
-                "description": "Absolute path of the file to read"
+                "description": "Absolute or relative path of the file to view"
             },
-            "start_line": {
-                "type": "integer",
-                "description": "(Optional) Starting line to read from, 0-based"
-            },
-            "end_line": {
-                "type": "integer",
-                "description": "(Optional) Ending line number (exclusive)"
-            },
-            "sudo": {
-                "type": "boolean",
-                "description": "(Optional) Whether to use sudo privileges"
+            "view_range": {
+                "type": "array",
+                "description": "(Optional) [start_line, end_line] 1-indexed. Example: [1, 50] views lines 1-50",
+                "items": {"type": "integer"}
             }
         },
-        required=["file"]
+        required=["path"]
     )
-    async def file_read(
+    async def file_view(
         self,
-        file: str,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
-        sudo: Optional[bool] = False
+        path: str,
+        view_range: Optional[list] = None
     ) -> ToolResult:
-        """Read file content
+        """View file content using OpenHands file_editor
         
         Args:
-            file: Absolute path of the file to read
-            start_line: (Optional) Starting line, 0-based
-            end_line: (Optional) Ending line (exclusive)
-            sudo: (Optional) Whether to use sudo privileges
+            path: Absolute or relative path of the file
+            view_range: Optional [start_line, end_line] 1-indexed
             
         Returns:
-            File content
+            File content with line numbers
         """
-        # Directly call sandbox's file_read method
-        return await self.sandbox.file_read(
-            file=file,
-            start_line=start_line,
-            end_line=end_line,
-            sudo=sudo
-        )
+        try:
+            # Build command arguments
+            args = {
+                "command": "view",
+                "path": path
+            }
+            if view_range:
+                args["view_range"] = view_range
+            
+            # Execute file_editor inside sandbox
+            cmd = f"python3 /openhands/tools/file_editor_cli.py '{json.dumps(args)}'"
+            result = await self.sandbox.exec_command_stateful(
+                command=cmd,
+                session_id="default"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"file_view failed: {str(e)}")
+            return ToolResult(
+                success=False,
+                message=f"Failed to view file: {str(e)}"
+            )
     
     @tool(
-        name="file_write",
-        description="Overwrite or append content to a file. Use for creating new files, appending content, or modifying existing files.",
+        name="file_create",
+        description="Create a new file with content. Uses OpenHands file_editor for robust file creation.",
         parameters={
-            "file": {
+            "path": {
                 "type": "string",
-                "description": "Absolute path of the file to write to"
+                "description": "Absolute or relative path of the file to create"
             },
-            "content": {
+            "file_text": {
                 "type": "string",
-                "description": "Text content to write"
-            },
-            "append": {
-                "type": "boolean",
-                "description": "(Optional) Whether to use append mode"
-            },
-            "leading_newline": {
-                "type": "boolean",
-                "description": "(Optional) Whether to add a leading newline"
-            },
-            "trailing_newline": {
-                "type": "boolean",
-                "description": "(Optional) Whether to add a trailing newline"
-            },
-            "sudo": {
-                "type": "boolean",
-                "description": "(Optional) Whether to use sudo privileges"
+                "description": "Complete content to write to the file"
             }
         },
-        required=["file", "content"]
+        required=["path", "file_text"]
     )
-    async def file_write(
+    async def file_create(
         self,
-        file: str,
-        content: str,
-        append: Optional[bool] = False,
-        leading_newline: Optional[bool] = False,
-        trailing_newline: Optional[bool] = False,
-        sudo: Optional[bool] = False
+        path: str,
+        file_text: str
     ) -> ToolResult:
-        """Write content to file
+        """Create a new file using OpenHands file_editor
         
         Args:
-            file: Absolute path of the file to write to
-            content: Text content to write
-            append: (Optional) Whether to use append mode
-            leading_newline: (Optional) Whether to add a leading newline
-            trailing_newline: (Optional) Whether to add a trailing newline
-            sudo: (Optional) Whether to use sudo privileges
+            path: Path of the file to create
+            file_text: Content to write
             
         Returns:
-            Write result
+            Creation result
         """
-        # Prepare content
-        final_content = content
-        if leading_newline:
-            final_content = "\n" + final_content
-        if trailing_newline:
-            final_content = final_content + "\n"
+        try:
+            args = {
+                "command": "create",
+                "path": path,
+                "file_text": file_text
+            }
             
-        # Directly call sandbox's file_write method, pass all parameters
-        return await self.sandbox.file_write(
-            file=file, 
-            content=final_content,
-            append=append,
-            leading_newline=False,  # Already handled in final_content
-            trailing_newline=False,  # Already handled in final_content
-            sudo=sudo
-        )
+            cmd = f"python3 /openhands/tools/file_editor_cli.py '{json.dumps(args)}'"
+            result = await self.sandbox.exec_command_stateful(
+                command=cmd,
+                session_id="default"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"file_create failed: {str(e)}")
+            return ToolResult(
+                success=False,
+                message=f"Failed to create file: {str(e)}"
+            )
     
     @tool(
         name="file_str_replace",
-        description="Replace specified string in a file. Use for updating specific content in files or fixing errors in code.",
+        description="Replace string in a file intelligently. Uses OpenHands file_editor for smart string replacement with context awareness.",
         parameters={
-            "file": {
+            "path": {
                 "type": "string",
-                "description": "Absolute path of the file to perform replacement on"
+                "description": "Absolute or relative path of the file"
             },
             "old_str": {
                 "type": "string",
-                "description": "Original string to be replaced"
+                "description": "Exact string to find and replace (must match exactly including whitespace)"
             },
             "new_str": {
                 "type": "string",
                 "description": "New string to replace with"
-            },
-            "sudo": {
-                "type": "boolean",
-                "description": "(Optional) Whether to use sudo privileges"
             }
         },
-        required=["file", "old_str", "new_str"]
+        required=["path", "old_str", "new_str"]
     )
     async def file_str_replace(
         self,
-        file: str,
+        path: str,
         old_str: str,
-        new_str: str,
-        sudo: Optional[bool] = False
+        new_str: str
     ) -> ToolResult:
-        """Replace specified string in file
+        """Replace string in file using OpenHands file_editor
         
         Args:
-            file: Absolute path of the file to perform replacement on
-            old_str: Original string to be replaced
-            new_str: New string to replace with
-            sudo: (Optional) Whether to use sudo privileges
+            path: Path of the file
+            old_str: Original string to replace
+            new_str: New string
             
         Returns:
             Replacement result
         """
-        # Directly call sandbox's file_replace method
-        return await self.sandbox.file_replace(
-            file=file,
-            old_str=old_str,
-            new_str=new_str,
-            sudo=sudo
-        )
+        try:
+            args = {
+                "command": "str_replace",
+                "path": path,
+                "old_str": old_str,
+                "new_str": new_str
+            }
+            
+            cmd = f"python3 /openhands/tools/file_editor_cli.py '{json.dumps(args)}'"
+            result = await self.sandbox.exec_command_stateful(
+                command=cmd,
+                session_id="default"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"file_str_replace failed: {str(e)}")
+            return ToolResult(
+                success=False,
+                message=f"Failed to replace string: {str(e)}"
+            )
     
     @tool(
         name="file_find_in_content",

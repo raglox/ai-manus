@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, List, BinaryIO
+from typing import Dict, Any, Optional, List, BinaryIO, Tuple
 import uuid
 import httpx
 import docker
@@ -6,6 +6,8 @@ import socket
 import logging
 import asyncio
 import io
+import re
+from pathlib import Path
 from async_lru import alru_cache
 from app.core.config import get_settings
 from app.domain.models.tool_result import ToolResult
@@ -16,7 +18,61 @@ from app.domain.external.llm import LLM
 
 logger = logging.getLogger(__name__)
 
+
+class StatefulSession:
+    """
+    Maintains state for a single shell session.
+    
+    This class tracks:
+    - Current working directory (CWD)
+    - Environment variables
+    - Background processes (PID tracking)
+    
+    Based on OpenHands SDK runtime patterns.
+    """
+    
+    def __init__(self, session_id: str, initial_cwd: str = "/workspace"):
+        self.session_id = session_id
+        self.cwd = initial_cwd
+        self.env_vars: Dict[str, str] = {}
+        self.background_pids: Dict[str, int] = {}  # command -> PID mapping
+        
+    def update_cwd(self, new_cwd: str):
+        """Update current working directory"""
+        self.cwd = new_cwd
+        logger.debug(f"Session {self.session_id}: CWD updated to {new_cwd}")
+        
+    def set_env(self, key: str, value: str):
+        """Set environment variable"""
+        self.env_vars[key] = value
+        logger.debug(f"Session {self.session_id}: ENV {key}={value}")
+        
+    def get_env(self, key: str) -> Optional[str]:
+        """Get environment variable"""
+        return self.env_vars.get(key)
+    
+    def add_background_process(self, command: str, pid: int):
+        """Track a background process"""
+        self.background_pids[command] = pid
+        logger.info(f"Session {self.session_id}: Background process started - PID {pid}")
+        
+    def remove_background_process(self, command: str):
+        """Remove tracked background process"""
+        if command in self.background_pids:
+            pid = self.background_pids.pop(command)
+            logger.info(f"Session {self.session_id}: Background process removed - PID {pid}")
+
 class DockerSandbox(Sandbox):
+    """
+    Stateful Docker Sandbox with session context preservation.
+    
+    Enhanced to support:
+    - Persistent CWD and ENV between commands (OpenHands SDK pattern)
+    - Background process management
+    - Skills/plugins injection at /openhands/tools
+    - File editor integration
+    """
+    
     def __init__(self, ip: str = None, container_name: str = None):
         """Initialize Docker sandbox and API interaction client"""
         self.client = httpx.AsyncClient(timeout=600)
@@ -25,6 +81,18 @@ class DockerSandbox(Sandbox):
         self._vnc_url = f"ws://{self.ip}:5901"
         self._cdp_url = f"http://{self.ip}:9222"
         self._container_name = container_name
+        
+        # Stateful session management (NEW)
+        self._sessions: Dict[str, StatefulSession] = {}
+        self._default_session_id = "default"
+        self._get_or_create_session(self._default_session_id)
+    
+    def _get_or_create_session(self, session_id: str) -> StatefulSession:
+        """Get existing session or create new one"""
+        if session_id not in self._sessions:
+            self._sessions[session_id] = StatefulSession(session_id)
+            logger.info(f"Created new stateful session: {session_id}")
+        return self._sessions[session_id]
     
     @property
     def id(self) -> str:
@@ -88,6 +156,13 @@ class DockerSandbox(Sandbox):
         try:
             # Create Docker client
             docker_client = docker.from_env()
+            
+            # Prepare plugins directory for volume mount
+            plugins_dir = Path(__file__).parent / "plugins"
+            plugins_dir.mkdir(parents=True, exist_ok=True)
+            plugins_dir_str = str(plugins_dir.absolute())
+            
+            logger.info(f"Plugins directory: {plugins_dir_str}")
 
             # Prepare container configuration
             container_config = {
@@ -100,7 +175,14 @@ class DockerSandbox(Sandbox):
                     "CHROME_ARGS": settings.sandbox_chrome_args,
                     "HTTPS_PROXY": settings.sandbox_https_proxy,
                     "HTTP_PROXY": settings.sandbox_http_proxy,
-                    "NO_PROXY": settings.sandbox_no_proxy
+                    "NO_PROXY": settings.sandbox_no_proxy,
+                    "PYTHONPATH": "/openhands/tools:$PYTHONPATH",  # Add tools to Python path
+                },
+                "volumes": {
+                    plugins_dir_str: {
+                        "bind": "/openhands/tools",
+                        "mode": "ro"  # Read-only mount
+                    }
                 }
             }
             
@@ -217,15 +299,153 @@ class DockerSandbox(Sandbox):
             return False
 
     async def exec_command(self, session_id: str, exec_dir: str, command: str) -> ToolResult:
-        response = await self.client.post(
-            f"{self.base_url}/api/v1/shell/exec",
-            json={
-                "id": session_id,
-                "exec_dir": exec_dir,
-                "command": command
+        """Legacy exec_command - redirects to stateful execution for backward compatibility"""
+        result = await self.exec_command_stateful(command, session_id)
+        return ToolResult(
+            success=(result["exit_code"] == 0),
+            message=result["stdout"] if result["exit_code"] == 0 else result["stderr"],
+            data={
+                "exit_code": result["exit_code"],
+                "stdout": result["stdout"],
+                "stderr": result["stderr"],
+                "cwd": result["cwd"]
             }
         )
-        return ToolResult(**response.json())
+    
+    async def exec_command_stateful(
+        self, 
+        command: str, 
+        session_id: str = None,
+        timeout: int = 120
+    ) -> Dict[str, Any]:
+        """
+        Execute command with stateful context preservation (OpenHands SDK pattern).
+        
+        This method:
+        1. Loads session CWD and ENV
+        2. Wraps command to preserve state
+        3. Extracts new CWD after execution
+        4. Parses ENV changes
+        5. Handles background processes (&)
+        
+        Args:
+            command: Shell command to execute
+            session_id: Session identifier (default: "default")
+            timeout: Command timeout in seconds
+            
+        Returns:
+            Dict with keys: exit_code, stdout, stderr, cwd, background_pid (optional)
+            
+        Example:
+            # Stateful ENV preservation
+            result1 = await sandbox.exec_command_stateful("export USER=Test")
+            result2 = await sandbox.exec_command_stateful("echo $USER")
+            # result2["stdout"] will contain "Test"
+        """
+        if session_id is None:
+            session_id = self._default_session_id
+            
+        session = self._get_or_create_session(session_id)
+        
+        # Check if command should run in background
+        is_background = command.strip().endswith('&')
+        if is_background:
+            command = command.strip()[:-1].strip()  # Remove trailing &
+        
+        # Build stateful command wrapper
+        # 1. cd to session CWD
+        # 2. Export session ENV vars
+        # 3. Execute command
+        # 4. Capture new CWD and ENV changes
+        
+        env_exports = " ".join([f"export {k}={v};" for k, v in session.env_vars.items()])
+        
+        if is_background:
+            # For background processes, capture PID
+            wrapped_command = f"""
+cd {session.cwd} || true
+{env_exports}
+nohup {command} > /tmp/bg_$$.out 2>&1 & echo $!
+pwd
+"""
+        else:
+            wrapped_command = f"""
+cd {session.cwd} || true
+{env_exports}
+{command}
+EXIT_CODE=$?
+pwd
+exit $EXIT_CODE
+"""
+        
+        # Execute via sandbox API
+        try:
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/shell/exec",
+                json={
+                    "id": session_id,
+                    "exec_dir": session.cwd,
+                    "command": wrapped_command
+                },
+                timeout=timeout
+            )
+            
+            result = response.json()
+            
+            # Parse result
+            exit_code = result.get("exit_code", -1)
+            stdout = result.get("stdout", "")
+            stderr = result.get("stderr", "")
+            
+            # Extract new CWD from last line of stdout
+            if stdout:
+                lines = stdout.strip().split('\n')
+                if lines:
+                    potential_cwd = lines[-1].strip()
+                    # Check if it looks like a path
+                    if potential_cwd.startswith('/'):
+                        session.update_cwd(potential_cwd)
+                        # Remove CWD from output
+                        stdout = '\n'.join(lines[:-1]) if len(lines) > 1 else ""
+            
+            # Handle background process
+            background_pid = None
+            if is_background and stdout:
+                lines = stdout.strip().split('\n')
+                if lines and lines[0].isdigit():
+                    background_pid = int(lines[0])
+                    session.add_background_process(command, background_pid)
+                    stdout = '\n'.join(lines[1:]) if len(lines) > 1 else ""
+            
+            # Parse ENV changes from command (if export was used)
+            if 'export ' in command:
+                # Extract export statements
+                exports = re.findall(r'export\s+(\w+)=([^\s;]+)', command)
+                for key, value in exports:
+                    session.set_env(key, value.strip('"').strip("'"))
+            
+            result_dict = {
+                "exit_code": exit_code,
+                "stdout": stdout,
+                "stderr": stderr,
+                "cwd": session.cwd,
+                "session_id": session_id
+            }
+            
+            if background_pid:
+                result_dict["background_pid"] = background_pid
+                
+            return result_dict
+            
+        except Exception as e:
+            logger.error(f"Stateful command execution failed: {e}")
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(e),
+                "cwd": session.cwd,
+                "session_id": session_id
+            }
 
     async def view_shell(self, session_id: str, console: bool = False) -> ToolResult:
         response = await self.client.post(
