@@ -354,7 +354,7 @@ class BrowserTool(BaseTool):
         parameters={
             "direction": {
                 "type": "string",
-                "description": "Scroll direction: 'down' or 'up'. Default is 'down'.",
+                "description": "(Optional) Scroll direction: 'down' or 'up'. Default is 'down'.",
                 "enum": ["down", "up"]
             },
             "max_scrolls": {
@@ -362,7 +362,7 @@ class BrowserTool(BaseTool):
                 "description": "(Optional) Maximum number of scrolls to perform. Default is 10."
             }
         },
-        required=["direction"]
+        required=[]
     )
     async def browser_smart_scroll(
         self,

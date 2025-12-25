@@ -302,20 +302,10 @@ class FileTool(BaseTool):
             # Import the processor
             from app.domain.services.tools.file_processors import DataFileProcessor
             
-            # Read file from sandbox
-            file_result = await self.sandbox.file_read(file)
-            if not file_result.success:
-                return ToolResult(
-                    success=False,
-                    message=f"Failed to read file: {file_result.message}"
-                )
-            
             # Get file extension
             _, ext = os.path.splitext(file)
             
-            # Process file
-            # Note: file_result.data is text content, we need binary
-            # For now, let's download it properly
+            # Download file as binary directly (no redundant file_read)
             try:
                 file_stream = await self.sandbox.file_download(file)
                 file_content = file_stream.read()
@@ -419,10 +409,13 @@ class FileTool(BaseTool):
                     message=f"Failed to download PDF file: {str(e)}"
                 )
             
-            # Prepare page range
+            # Prepare page range - handle both start and end together, or individually
             page_range = None
-            if start_page is not None and end_page is not None:
-                page_range = (start_page, end_page)
+            if start_page is not None or end_page is not None:
+                # If only one is provided, use it with a default for the other
+                start = start_page if start_page is not None else 0
+                # end will be set to total pages in the processor if None
+                page_range = (start, end_page)
             
             # Process PDF
             extraction_result = PDFProcessor.process_pdf(

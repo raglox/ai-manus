@@ -104,54 +104,101 @@ class DataFileProcessor:
         try:
             # Handle common query patterns
             if "average" in query_lower or "mean" in query_lower:
-                # Extract column name
+                # Extract column name - use longest match to avoid substring ambiguity
+                matched_col = None
+                max_length = 0
                 for col in df.columns:
-                    if col.lower() in query_lower:
-                        if pd.api.types.is_numeric_dtype(df[col]):
-                            result["result"] = f"Average of '{col}': {df[col].mean():.2f}"
-                        else:
-                            result["error"] = f"Column '{col}' is not numeric"
-                        break
+                    if col.lower() in query_lower and len(col) > max_length:
+                        matched_col = col
+                        max_length = len(col)
+                
+                if matched_col:
+                    if pd.api.types.is_numeric_dtype(df[matched_col]):
+                        result["result"] = f"Average of '{matched_col}': {df[matched_col].mean():.2f}"
+                    else:
+                        result["error"] = f"Column '{matched_col}' is not numeric"
+                else:
+                    result["error"] = "No matching column found in the query"
                         
             elif "sum" in query_lower or "total" in query_lower:
+                # Extract column name - use longest match to avoid substring ambiguity
+                matched_col = None
+                max_length = 0
                 for col in df.columns:
-                    if col.lower() in query_lower:
-                        if pd.api.types.is_numeric_dtype(df[col]):
-                            result["result"] = f"Sum of '{col}': {df[col].sum():.2f}"
-                        else:
-                            result["error"] = f"Column '{col}' is not numeric"
-                        break
+                    if col.lower() in query_lower and len(col) > max_length:
+                        matched_col = col
+                        max_length = len(col)
+                
+                if matched_col:
+                    if pd.api.types.is_numeric_dtype(df[matched_col]):
+                        result["result"] = f"Sum of '{matched_col}': {df[matched_col].sum():.2f}"
+                    else:
+                        result["error"] = f"Column '{matched_col}' is not numeric"
+                else:
+                    result["error"] = "No matching column found in the query"
                         
             elif "count" in query_lower:
+                # Extract column name - use longest match to avoid substring ambiguity
+                matched_col = None
+                max_length = 0
                 for col in df.columns:
-                    if col.lower() in query_lower:
-                        result["result"] = f"Count of '{col}': {df[col].count()}"
-                        break
+                    if col.lower() in query_lower and len(col) > max_length:
+                        matched_col = col
+                        max_length = len(col)
+                
+                if matched_col:
+                    result["result"] = f"Count of '{matched_col}': {df[matched_col].count()}"
+                else:
+                    result["error"] = "No matching column found in the query"
                         
             elif "max" in query_lower or "maximum" in query_lower:
+                # Extract column name - use longest match to avoid substring ambiguity
+                matched_col = None
+                max_length = 0
                 for col in df.columns:
-                    if col.lower() in query_lower:
-                        if pd.api.types.is_numeric_dtype(df[col]):
-                            result["result"] = f"Maximum of '{col}': {df[col].max():.2f}"
-                        else:
-                            result["error"] = f"Column '{col}' is not numeric"
-                        break
+                    if col.lower() in query_lower and len(col) > max_length:
+                        matched_col = col
+                        max_length = len(col)
+                
+                if matched_col:
+                    if pd.api.types.is_numeric_dtype(df[matched_col]):
+                        result["result"] = f"Maximum of '{matched_col}': {df[matched_col].max():.2f}"
+                    else:
+                        result["error"] = f"Column '{matched_col}' is not numeric"
+                else:
+                    result["error"] = "No matching column found in the query"
                         
             elif "min" in query_lower or "minimum" in query_lower:
+                # Extract column name - use longest match to avoid substring ambiguity
+                matched_col = None
+                max_length = 0
                 for col in df.columns:
-                    if col.lower() in query_lower:
-                        if pd.api.types.is_numeric_dtype(df[col]):
-                            result["result"] = f"Minimum of '{col}': {df[col].min():.2f}"
-                        else:
-                            result["error"] = f"Column '{col}' is not numeric"
-                        break
+                    if col.lower() in query_lower and len(col) > max_length:
+                        matched_col = col
+                        max_length = len(col)
+                
+                if matched_col:
+                    if pd.api.types.is_numeric_dtype(df[matched_col]):
+                        result["result"] = f"Minimum of '{matched_col}': {df[matched_col].min():.2f}"
+                    else:
+                        result["error"] = f"Column '{matched_col}' is not numeric"
+                else:
+                    result["error"] = "No matching column found in the query"
                         
             elif "unique" in query_lower or "distinct" in query_lower:
+                # Extract column name - use longest match to avoid substring ambiguity
+                matched_col = None
+                max_length = 0
                 for col in df.columns:
-                    if col.lower() in query_lower:
-                        unique_values = df[col].unique().tolist()
-                        result["result"] = f"Unique values in '{col}': {unique_values[:20]}"  # Limit to 20
-                        break
+                    if col.lower() in query_lower and len(col) > max_length:
+                        matched_col = col
+                        max_length = len(col)
+                
+                if matched_col:
+                    unique_values = df[matched_col].unique().tolist()
+                    result["result"] = f"Unique values in '{matched_col}': {unique_values[:20]}"  # Limit to 20
+                else:
+                    result["error"] = "No matching column found in the query"
                         
             else:
                 result["error"] = "Query pattern not recognized. Supported: average, sum, count, max, min, unique"
@@ -199,8 +246,14 @@ class PDFProcessor:
                 result["total_pages"] = len(pdf.pages)
                 
                 # Determine page range
-                start_page = page_range[0] if page_range else 0
-                end_page = page_range[1] if page_range else len(pdf.pages)
+                # Handle partial page_range: (start, None) or (start, end)
+                if page_range:
+                    start_page = page_range[0] if page_range[0] is not None else 0
+                    end_page = page_range[1] if page_range[1] is not None else len(pdf.pages)
+                else:
+                    start_page = 0
+                    end_page = len(pdf.pages)
+                
                 end_page = min(end_page, len(pdf.pages))
                 
                 for page_num in range(start_page, end_page):

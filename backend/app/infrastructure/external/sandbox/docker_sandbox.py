@@ -185,8 +185,8 @@ class DockerSandbox(Sandbox):
         # If we reach here, we've exhausted all retries
         error_message = f"Sandbox services failed to start after {max_retries} attempts ({max_retries * retry_interval} seconds)"
         logger.error(error_message)
-        # TODO: find a way to handle this
-        #raise Exception(error_message)
+        # CRITICAL: Raise exception to prevent continuation with broken sandbox
+        raise Exception(error_message)
     
     async def _check_cdp_health(self) -> bool:
         """
@@ -465,7 +465,7 @@ class DockerSandbox(Sandbox):
             )
 
     async def file_download(self, path: str) -> BinaryIO:
-        """Download file from sandbox with streaming support for large files
+        """Download file from sandbox with TRUE streaming support for large files
         
         Args:
             path: File path in sandbox
@@ -474,22 +474,29 @@ class DockerSandbox(Sandbox):
             File content as binary stream
         """
         try:
-            # Use streaming download to handle large files efficiently
-            response = await self.client.get(
+            # Use TRUE streaming download with client.stream() to handle large files efficiently
+            async with self.client.stream(
+                "GET",
                 f"{self.base_url}/api/v1/file/download",
                 params={"path": path},
                 timeout=300.0  # 5 minutes for large files
-            )
-            response.raise_for_status()
-            
-            # Stream content to BytesIO
-            # For very large files, consider using tempfile instead
-            file_size = len(response.content)
-            
-            if file_size > 100 * 1024 * 1024:  # > 100MB
-                logger.warning(f"Large file download ({file_size / 1024 / 1024:.2f} MB) - consider using chunked processing")
-            
-            return io.BytesIO(response.content)
+            ) as response:
+                response.raise_for_status()
+                
+                # Get file size from headers if available
+                content_length = response.headers.get('content-length')
+                file_size = int(content_length) if content_length else 0
+                
+                if file_size > 100 * 1024 * 1024:  # > 100MB
+                    logger.warning(f"Large file download ({file_size / 1024 / 1024:.2f} MB) - using streaming")
+                
+                # Stream content to BytesIO chunk by chunk
+                buffer = io.BytesIO()
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    buffer.write(chunk)
+                
+                buffer.seek(0)  # Reset to beginning
+                return buffer
             
         except httpx.TimeoutException:
             logger.error(f"Download timeout for file: {path}")
