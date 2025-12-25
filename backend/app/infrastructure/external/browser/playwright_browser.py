@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, List
 from playwright.async_api import async_playwright, Browser, Page
 import asyncio
+import time
 from markdownify import markdownify
 from app.infrastructure.external.llm.openai_llm import OpenAILLM
 from app.core.config import get_settings
@@ -149,10 +150,10 @@ class PlaywrightBrowser:
         """
         await self._ensure_page()
         
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()  # ✅ Fixed: using time.monotonic()
         check_interval = 5  # Check every 5 seconds
         
-        while asyncio.get_event_loop().time() - start_time < timeout:
+        while time.monotonic() - start_time < timeout:
             # Check if the page has completely loaded
             is_loaded = await self.page.evaluate("""() => {
                 return document.readyState === 'complete';

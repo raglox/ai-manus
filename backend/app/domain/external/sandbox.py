@@ -1,4 +1,4 @@
-from typing import Any, Optional, Protocol, BinaryIO
+from typing import Any, Optional, Protocol, BinaryIO, Dict, List
 from app.domain.models.tool_result import ToolResult
 from app.domain.external.browser import Browser
 from app.domain.external.llm import LLM
@@ -293,5 +293,112 @@ class Sandbox(Protocol):
             
         Returns:
             Sandbox instance
+        """
+        ...
+    
+    # ============================================================
+    # Stateful Session & Background Process Management (NEW)
+    # ============================================================
+    
+    async def exec_command_stateful(
+        self,
+        command: str,
+        session_id: Optional[str] = None,
+        timeout: int = 120
+    ) -> Dict[str, Any]:
+        """Execute command with stateful context preservation.
+        
+        Preserves CWD and ENV between commands in the same session.
+        Supports background processes with & suffix.
+        
+        Args:
+            command: Shell command to execute
+            session_id: Session identifier (default: "default")
+            timeout: Command timeout in seconds
+            
+        Returns:
+            Dict with keys:
+            - exit_code: Command exit code
+            - stdout: Standard output
+            - stderr: Standard error
+            - cwd: Current working directory after execution
+            - session_id: Session identifier
+            - background_pid: PID if background process (optional)
+            
+        Example:
+            result = await sandbox.exec_command_stateful("export USER=Test")
+            result2 = await sandbox.exec_command_stateful("echo $USER")
+            # result2["stdout"] contains "Test"
+        """
+        ...
+    
+    async def get_background_logs(self, pid: int) -> Optional[str]:
+        """Get logs from background process output file.
+        
+        Background processes redirect output to /tmp/bg_$PID.out
+        
+        Args:
+            pid: Process ID
+            
+        Returns:
+            Log content as string, or None if not available
+            
+        Example:
+            logs = await sandbox.get_background_logs(12345)
+            if logs:
+                print(logs)
+        """
+        ...
+    
+    async def list_background_processes(
+        self,
+        session_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List all background processes, optionally filtered by session.
+        
+        Args:
+            session_id: Optional session filter. If None, lists all sessions.
+            
+        Returns:
+            List of process info dicts with keys:
+            - session_id: Session owning the process
+            - command: Original command
+            - pid: Process ID
+            - running: Whether process is still running
+            
+        Example:
+            processes = await sandbox.list_background_processes()
+            for proc in processes:
+                print(f"PID {proc['pid']}: {proc['command']}")
+        """
+        ...
+    
+    async def kill_background_process(
+        self,
+        pid: Optional[int] = None,
+        session_id: Optional[str] = None,
+        pattern: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Kill background process(es) by PID, session, or pattern.
+        
+        Args:
+            pid: Specific PID to kill
+            session_id: Kill all processes in this session
+            pattern: Kill processes matching this command pattern
+            
+        Returns:
+            Dict with keys:
+            - killed_count: Number of processes killed
+            - killed_pids: List of PIDs that were killed
+            
+        Examples:
+            # Kill by PID
+            await sandbox.kill_background_process(pid=12345)
+            
+            # Kill all in session
+            await sandbox.kill_background_process(session_id="temp")
+            
+            # Kill by pattern
+            await sandbox.kill_background_process(pattern="http.server")
         """
         ...

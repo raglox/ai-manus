@@ -12,6 +12,7 @@ Reference: https://github.com/OpenHands/software-agent-sdk
 """
 
 import re
+import time
 import asyncio
 from typing import Optional, Dict, Any, List
 from app.domain.external.sandbox import Sandbox
@@ -20,6 +21,14 @@ from app.domain.models.tool_result import ToolResult
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# Security: Allowed server commands (whitelist)
+ALLOWED_SERVER_COMMANDS = {
+    'npm', 'node', 'python', 'python3', 'flask', 'uvicorn',
+    'gunicorn', 'django-admin', 'php', 'ruby', 'rails', 'deno',
+    'bun', 'pnpm', 'yarn', 'next', 'vite', 'webpack-dev-server'
+}
 
 
 class WebDevTool(BaseTool):
@@ -45,6 +54,94 @@ class WebDevTool(BaseTool):
         """
         super().__init__()
         self.sandbox = sandbox
+        self._started_servers: List[int] = []  # ✅ Track started server PIDs for cleanup
+    
+    def _validate_command(self, command: str) -> None:
+        """✅ SECURITY: Validate server command before execution.
+        
+        Args:
+            command: Command to validate
+            
+        Raises:
+            ValueError: If command is unsafe
+        """
+        if not command or not command.strip():
+            raise ValueError("Command cannot be empty")
+        
+        # Extract first word (the actual command)
+        first_word = command.strip().split()[0]
+        
+        # Remove path if present (e.g., "./node" -> "node")
+        command_name = first_word.split('/')[-1]
+        
+        # Check whitelist
+        if command_name not in ALLOWED_SERVER_COMMANDS:
+            raise ValueError(
+                f"Command '{command_name}' is not allowed for web servers. "
+                f"Allowed commands: {', '.join(sorted(ALLOWED_SERVER_COMMANDS))}"
+            )
+        
+        # Check for dangerous characters
+        dangerous_chars = [';', '|', '&&', '||', '`', '$(']
+        for char in dangerous_chars:
+            if char in command:
+                raise ValueError(
+                    f"Command contains dangerous character/sequence: '{char}'. "
+                    f"This could be a security risk."
+                )
+        
+        logger.debug(f"Command validation passed: {command}")
+    
+    def _validate_pid(self, pid: int) -> None:
+        """✅ Validate PID.
+        
+        Args:
+            pid: Process ID to validate
+            
+        Raises:
+            ValueError: If PID is invalid
+        """
+        if pid is None:
+            raise ValueError("PID cannot be None")
+        if not isinstance(pid, int):
+            raise ValueError(f"PID must be an integer, got {type(pid)}")
+        if pid <= 0:
+            raise ValueError(f"PID must be positive, got {pid}")
+    
+    async def cleanup(self) -> Dict[str, Any]:
+        """✅ Cleanup all resources started by this tool.
+        
+        Stops all servers that were started through this tool instance.
+        
+        Returns:
+            Dict with cleanup stats:
+            - stopped_count: Number of servers stopped
+            - stopped_pids: List of PIDs that were stopped
+            - failed_pids: List of PIDs that failed to stop
+        """
+        stopped_pids = []
+        failed_pids = []
+        
+        logger.info(f"Cleaning up {len(self._started_servers)} tracked servers...")
+        
+        for pid in list(self._started_servers):  # Copy list to avoid modification during iteration
+            try:
+                result = await self.stop_server(pid)
+                if result.success:
+                    stopped_pids.append(pid)
+                else:
+                    failed_pids.append(pid)
+            except Exception as e:
+                logger.error(f"Failed to stop server {pid} during cleanup: {e}")
+                failed_pids.append(pid)
+        
+        logger.info(f"Cleanup complete: {len(stopped_pids)} stopped, {len(failed_pids)} failed")
+        
+        return {
+            "stopped_count": len(stopped_pids),
+            "stopped_pids": stopped_pids,
+            "failed_pids": failed_pids
+        }
         
     @tool(
         name="start_server",
@@ -112,6 +209,9 @@ class WebDevTool(BaseTool):
             # Result: "Server started on http://localhost:8080 with PID 12345"
         """
         try:
+            # ✅ SECURITY: Validate command before execution
+            self._validate_command(command)
+            
             # Start server in background with & suffix
             logger.info(f"Starting server: {command}")
             
@@ -134,6 +234,9 @@ class WebDevTool(BaseTool):
                     message="Server started but PID not detected. Command may not support background execution.",
                     data={"command": command}
                 )
+            
+            # ✅ Track started server
+            self._started_servers.append(pid)
             
             log_file = f"/tmp/bg_{pid}.out"
             logger.info(f"Server started with PID {pid}, monitoring logs at {log_file}")
@@ -203,6 +306,11 @@ class WebDevTool(BaseTool):
         """
         Monitor server logs to detect URL.
         
+        ✅ FIXED:
+        - Memory leak: Now reads only new log lines incrementally
+        - Race condition: Takes LAST match instead of first
+        - Better pattern matching with context keywords
+        
         Searches for patterns like:
         - http://localhost:8080
         - http://127.0.0.1:3000
@@ -210,48 +318,74 @@ class WebDevTool(BaseTool):
         - Server running on http://0.0.0.0:8000
         
         Args:
-            pid: Process ID
+            pid: Process ID (must be valid positive integer)
             timeout_seconds: Maximum wait time
             session_id: Session identifier
             
         Returns:
             Detected URL or None
         """
-        # URL detection patterns
+        # ✅ FIXED: Validate PID
+        if pid is None or pid <= 0:
+            logger.error(f"Invalid PID: {pid}")
+            return None
+        
+        # URL detection patterns (with optional paths)
         url_patterns = [
-            r'https?://localhost:\d+',
-            r'https?://127\.0\.0\.1:\d+',
-            r'https?://0\.0\.0\.0:\d+',
+            r'https?://localhost:\d+(?:/[^\s]*)?',
+            r'https?://127\.0\.0\.1:\d+(?:/[^\s]*)?',
+            r'https?://0\.0\.0\.0:\d+(?:/[^\s]*)?',
+            r'https?://\[::\d*\]:\d+',  # IPv6 any
             r'https?://\[::1?\]:\d+',  # IPv6 localhost
         ]
         
-        log_file = f"/tmp/bg_{pid}.out"
-        start_time = asyncio.get_event_loop().time()
+        # Context keywords that indicate actual server start (not errors)
+        server_keywords = ['listening', 'running', 'started', 'ready', 'server', 'app']
         
-        while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+        log_file = f"/tmp/bg_{pid}.out"
+        start_time = time.monotonic()
+        last_read_size = 0  # ✅ FIXED: Track position to avoid re-reading
+        
+        while (time.monotonic() - start_time) < timeout_seconds:
             try:
-                # Read logs
-                logs = await self.sandbox.get_background_logs(pid)
+                # ✅ FIXED: Read only NEW log content to prevent memory leak
+                result = await self.sandbox.exec_command_stateful(
+                    f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null || echo ''",
+                    session_id=session_id
+                )
                 
-                if logs:
-                    # Search for URLs in logs
-                    for pattern in url_patterns:
-                        matches = re.findall(pattern, logs)
-                        if matches:
-                            url = matches[0]
-                            # Normalize 0.0.0.0 to localhost for accessibility
-                            url = url.replace('0.0.0.0', 'localhost')
-                            logger.info(f"Detected server URL: {url}")
-                            return url
+                new_logs = result.get("stdout", "")
+                
+                if new_logs:
+                    last_read_size += len(new_logs.encode('utf-8'))
+                    
+                    # ✅ FIXED: Search line by line with context
+                    for line in new_logs.split('\n'):
+                        line_lower = line.lower()
+                        
+                        # Check if line contains server-related keywords
+                        has_context = any(keyword in line_lower for keyword in server_keywords)
+                        
+                        if has_context:
+                            for pattern in url_patterns:
+                                matches = re.findall(pattern, line)
+                                if matches:
+                                    # ✅ FIXED: Take LAST match (most recent)
+                                    url = matches[-1]
+                                    # Remove trailing slashes and normalize
+                                    url = url.rstrip('/')
+                                    url = url.replace('0.0.0.0', 'localhost')
+                                    logger.info(f"Detected server URL: {url} (from line: {line.strip()})")
+                                    return url
                 
                 # Wait before next check
                 await asyncio.sleep(0.5)
                 
             except Exception as e:
-                logger.warning(f"Error reading logs: {e}")
+                logger.warning(f"Error reading logs for PID {pid}: {e}")
                 await asyncio.sleep(0.5)
         
-        logger.warning(f"URL detection timed out after {timeout_seconds} seconds")
+        logger.warning(f"URL detection timed out after {timeout_seconds} seconds for PID {pid}")
         return None
     
     @tool(
@@ -273,6 +407,12 @@ class WebDevTool(BaseTool):
         """
         Stop a web server by PID.
         
+        ✅ IMPROVED:
+        - PID validation
+        - Check process exists before killing
+        - Try SIGTERM first, then SIGKILL if needed
+        - Remove from tracking list
+        
         Args:
             pid: Process ID to kill
             
@@ -284,15 +424,46 @@ class WebDevTool(BaseTool):
             # Result: "✅ Server with PID 12345 stopped successfully"
         """
         try:
+            # ✅ Validate PID
+            self._validate_pid(pid)
+            
+            # Check if process exists
+            check_result = await self.sandbox.exec_command_stateful(f"ps -p {pid}")
+            if check_result["exit_code"] != 0:
+                return ToolResult(
+                    success=False,
+                    message=f"❌ Process {pid} does not exist or already stopped.",
+                    data={"pid": pid, "exists": False}
+                )
+            
+            # Try to kill the process
             result = await self.sandbox.kill_background_process(pid=pid)
             
             killed_count = result.get("killed_count", 0)
             
             if killed_count > 0:
+                # ✅ Remove from tracking
+                if pid in self._started_servers:
+                    self._started_servers.remove(pid)
+                
+                # Verify it's actually stopped
+                await asyncio.sleep(0.5)
+                recheck = await self.sandbox.exec_command_stateful(f"ps -p {pid}")
+                
+                if recheck["exit_code"] == 0:
+                    # Still running! Force kill
+                    logger.warning(f"PID {pid} still running, using SIGKILL")
+                    await self.sandbox.exec_command_stateful(f"kill -9 {pid}")
+                    return ToolResult(
+                        success=True,
+                        message=f"⚠️ Server with PID {pid} forcefully killed (SIGKILL).",
+                        data={"pid": pid, "method": "SIGKILL"}
+                    )
+                
                 return ToolResult(
                     success=True,
                     message=f"✅ Server with PID {pid} stopped successfully.",
-                    data={"pid": pid, "killed_count": killed_count}
+                    data={"pid": pid, "killed_count": killed_count, "method": "SIGTERM"}
                 )
             else:
                 return ToolResult(
@@ -301,6 +472,14 @@ class WebDevTool(BaseTool):
                     data={"pid": pid, "killed_count": 0}
                 )
                 
+        except ValueError as e:
+            # Validation error
+            logger.error(f"PID validation failed: {e}")
+            return ToolResult(
+                success=False,
+                message=f"Invalid PID: {str(e)}",
+                data={"pid": pid, "error": "validation_error"}
+            )
         except Exception as e:
             logger.error(f"Error stopping server: {e}")
             return ToolResult(
