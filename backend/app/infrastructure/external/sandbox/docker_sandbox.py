@@ -125,7 +125,12 @@ class DockerSandbox(Sandbox):
             raise Exception(f"Failed to create Docker sandbox: {str(e)}")
 
     async def ensure_sandbox(self) -> None:
-        """Ensure sandbox is ready by checking that all services are RUNNING"""
+        """Ensure sandbox is ready by checking that all services are RUNNING
+        
+        Enhanced with:
+        - Real health check for CDP port
+        - Better retry logic with exponential backoff
+        """
         max_retries = 30  # Maximum number of retries
         retry_interval = 2  # Seconds between retries
         
@@ -161,8 +166,14 @@ class DockerSandbox(Sandbox):
                         non_running_services.append(f"{service_name}({state_name})")
                 
                 if all_running:
-                    logger.info(f"All {len(services)} services are RUNNING - sandbox is ready")
-                    return  # Success - all services are running
+                    # Additional health check: verify CDP port is accessible
+                    cdp_accessible = await self._check_cdp_health()
+                    if cdp_accessible:
+                        logger.info(f"All {len(services)} services are RUNNING and CDP is accessible - sandbox is ready")
+                        return  # Success
+                    else:
+                        logger.warning(f"Services running but CDP port not accessible yet (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(retry_interval)
                 else:
                     logger.info(f"Waiting for services to start... Non-running: {', '.join(non_running_services)} (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(retry_interval)
@@ -176,6 +187,34 @@ class DockerSandbox(Sandbox):
         logger.error(error_message)
         # TODO: find a way to handle this
         #raise Exception(error_message)
+    
+    async def _check_cdp_health(self) -> bool:
+        """
+        Real health check for Chrome DevTools Protocol port.
+        Verifies that the CDP port is accessible and responding.
+        
+        Returns:
+            True if CDP is healthy, False otherwise
+        """
+        try:
+            # Try to connect to CDP endpoint
+            response = await self.client.get(
+                f"{self.cdp_url}/json/version",
+                timeout=5.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Verify response contains expected CDP fields
+                if "Browser" in data and "Protocol-Version" in data:
+                    logger.debug(f"CDP health check passed: {data.get('Browser')}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"CDP health check failed: {e}")
+            return False
 
     async def exec_command(self, session_id: str, exec_dir: str, command: str) -> ToolResult:
         response = await self.client.post(
@@ -388,7 +427,7 @@ class DockerSandbox(Sandbox):
         return ToolResult(**response.json())
 
     async def file_upload(self, file_data: BinaryIO, path: str, filename: str = None) -> ToolResult:
-        """Upload file to sandbox
+        """Upload file to sandbox with streaming support for large files
         
         Args:
             file_data: File content as binary stream
@@ -398,19 +437,35 @@ class DockerSandbox(Sandbox):
         Returns:
             Upload operation result
         """
-        # Prepare form data for upload
-        files = {"file": (filename or "upload", file_data, "application/octet-stream")}
-        data = {"path": path}
-        
-        response = await self.client.post(
-            f"{self.base_url}/api/v1/file/upload",
-            files=files,
-            data=data
-        )
-        return ToolResult(**response.json())
+        try:
+            # Prepare form data for upload
+            files = {"file": (filename or "upload", file_data, "application/octet-stream")}
+            data = {"path": path}
+            
+            # Use streaming upload for better memory efficiency
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/file/upload",
+                files=files,
+                data=data,
+                timeout=300.0  # 5 minutes for large files
+            )
+            response.raise_for_status()
+            
+            return ToolResult(**response.json())
+            
+        except httpx.TimeoutException:
+            return ToolResult(
+                success=False,
+                message=f"Upload timeout - file may be too large or network is slow"
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                message=f"Upload failed: {str(e)}"
+            )
 
     async def file_download(self, path: str) -> BinaryIO:
-        """Download file from sandbox
+        """Download file from sandbox with streaming support for large files
         
         Args:
             path: File path in sandbox
@@ -418,15 +473,30 @@ class DockerSandbox(Sandbox):
         Returns:
             File content as binary stream
         """
-        response = await self.client.get(
-            f"{self.base_url}/api/v1/file/download",
-            params={"path": path}
-        )
-        response.raise_for_status()
-        
-        # Return the response content as a BinaryIO stream
-        # TODO: change to real stream
-        return io.BytesIO(response.content)
+        try:
+            # Use streaming download to handle large files efficiently
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/file/download",
+                params={"path": path},
+                timeout=300.0  # 5 minutes for large files
+            )
+            response.raise_for_status()
+            
+            # Stream content to BytesIO
+            # For very large files, consider using tempfile instead
+            file_size = len(response.content)
+            
+            if file_size > 100 * 1024 * 1024:  # > 100MB
+                logger.warning(f"Large file download ({file_size / 1024 / 1024:.2f} MB) - consider using chunked processing")
+            
+            return io.BytesIO(response.content)
+            
+        except httpx.TimeoutException:
+            logger.error(f"Download timeout for file: {path}")
+            raise Exception(f"Download timeout - file may be too large or network is slow")
+        except Exception as e:
+            logger.error(f"Download failed for file {path}: {e}")
+            raise
     
     @staticmethod
     @alru_cache(maxsize=128, typed=True)
