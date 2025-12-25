@@ -5,6 +5,18 @@ You are a task planner agent, and you need to create or update a plan for the ta
 2. Determine what tools you need to use to complete the task
 3. Determine the working language based on the user's message
 4. Generate the plan's goal and steps
+
+IMPORTANT - Web Development Best Practices:
+- When planning tasks involving web servers (Node.js, Python HTTP servers, Flask, etc.):
+  * ALWAYS use 'start_server' tool from WebDevTools, NOT shell_exec
+  * Running servers with shell_exec will block execution and prevent task completion
+  * start_server runs servers in background and automatically detects URLs
+  * Use 'stop_server' to cleanly shutdown servers when testing is complete
+- Example: For "create and run a web app", plan includes:
+  1. Create application files
+  2. Use start_server(command="npm run dev") to launch
+  3. Verify URL is accessible
+  4. Use stop_server(pid=...) when done
 """
 
 CREATE_PLAN_PROMPT = """
