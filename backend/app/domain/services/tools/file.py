@@ -310,9 +310,11 @@ class FileTool(BaseTool):
                 file_stream = await self.sandbox.file_download(file)
                 file_content = file_stream.read()
             except Exception as e:
+                # Security: Don't leak internal exception details to user
+                logger.error(f"Excel/CSV download failed for {file}: {str(e)}")
                 return ToolResult(
                     success=False,
-                    message=f"Failed to download file for processing: {str(e)}"
+                    message="Failed to download file for processing. Please check the file path and try again."
                 )
             
             # Process with pandas
@@ -404,14 +406,37 @@ class FileTool(BaseTool):
                 file_stream = await self.sandbox.file_download(file)
                 file_content = file_stream.read()
             except Exception as e:
+                # Security: Don't leak internal exception details to user
+                logger.error(f"PDF download failed for {file}: {str(e)}")
                 return ToolResult(
                     success=False,
-                    message=f"Failed to download PDF file: {str(e)}"
+                    message="Failed to download PDF file. Please check the file path and try again."
                 )
             
             # Prepare page range - handle both start and end together, or individually
             page_range = None
             if start_page is not None or end_page is not None:
+                # Validation: Ensure non-negative page numbers
+                if start_page is not None and start_page < 0:
+                    return ToolResult(
+                        success=False,
+                        message="Invalid start_page: must be non-negative (0-indexed)"
+                    )
+                
+                if end_page is not None and end_page < 0:
+                    return ToolResult(
+                        success=False,
+                        message="Invalid end_page: must be non-negative"
+                    )
+                
+                # Validation: start must be less than end if both provided
+                if start_page is not None and end_page is not None:
+                    if start_page >= end_page:
+                        return ToolResult(
+                            success=False,
+                            message=f"Invalid page range: start_page ({start_page}) must be less than end_page ({end_page})"
+                        )
+                
                 # If only one is provided, use it with a default for the other
                 start = start_page if start_page is not None else 0
                 # end will be set to total pages in the processor if None

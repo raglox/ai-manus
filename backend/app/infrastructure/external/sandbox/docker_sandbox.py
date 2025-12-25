@@ -465,14 +465,20 @@ class DockerSandbox(Sandbox):
             )
 
     async def file_download(self, path: str) -> BinaryIO:
-        """Download file from sandbox with TRUE streaming support for large files
+        """Download file from sandbox with TRUE streaming support and size limits
         
         Args:
             path: File path in sandbox
             
         Returns:
             File content as binary stream
+            
+        Raises:
+            Exception: If file exceeds maximum size limit (500MB) or download fails
         """
+        # Security: Maximum file size to prevent DoS (500MB)
+        MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+        
         try:
             # Use TRUE streaming download with client.stream() to handle large files efficiently
             async with self.client.stream(
@@ -483,16 +489,41 @@ class DockerSandbox(Sandbox):
             ) as response:
                 response.raise_for_status()
                 
-                # Get file size from headers if available
-                content_length = response.headers.get('content-length')
-                file_size = int(content_length) if content_length else 0
+                # Safely parse file size from headers
+                content_length_str = response.headers.get('content-length')
+                file_size = 0
+                
+                if content_length_str:
+                    try:
+                        file_size = int(content_length_str)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid Content-Length header: {content_length_str}")
+                        file_size = 0  # Unknown size, will check during download
+                
+                # Security check: Reject files exceeding maximum size
+                if file_size > MAX_FILE_SIZE:
+                    raise Exception(
+                        f"File too large ({file_size / 1024 / 1024:.2f} MB). "
+                        f"Maximum allowed: {MAX_FILE_SIZE / 1024 / 1024:.0f} MB"
+                    )
                 
                 if file_size > 100 * 1024 * 1024:  # > 100MB
                     logger.warning(f"Large file download ({file_size / 1024 / 1024:.2f} MB) - using streaming")
                 
-                # Stream content to BytesIO chunk by chunk
+                # Stream content to BytesIO chunk by chunk with size tracking
                 buffer = io.BytesIO()
+                bytes_downloaded = 0
+                
                 async for chunk in response.aiter_bytes(chunk_size=8192):
+                    bytes_downloaded += len(chunk)
+                    
+                    # Security: Enforce size limit even if Content-Length is missing/wrong
+                    if bytes_downloaded > MAX_FILE_SIZE:
+                        raise Exception(
+                            f"Download exceeded maximum size limit "
+                            f"({MAX_FILE_SIZE / 1024 / 1024:.0f} MB)"
+                        )
+                    
                     buffer.write(chunk)
                 
                 buffer.seek(0)  # Reset to beginning
@@ -500,7 +531,7 @@ class DockerSandbox(Sandbox):
             
         except httpx.TimeoutException:
             logger.error(f"Download timeout for file: {path}")
-            raise Exception(f"Download timeout - file may be too large or network is slow")
+            raise Exception("Download timeout - file may be too large or network is slow")
         except Exception as e:
             logger.error(f"Download failed for file {path}: {e}")
             raise
