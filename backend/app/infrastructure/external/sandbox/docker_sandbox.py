@@ -94,6 +94,275 @@ class DockerSandbox(Sandbox):
             logger.info(f"Created new stateful session: {session_id}")
         return self._sessions[session_id]
     
+    # ============================================================
+    # Session Management API (NEW)
+    # ============================================================
+    
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """List all active sessions with their state
+        
+        Returns:
+            List of session info dicts containing:
+            - session_id: Session identifier
+            - cwd: Current working directory
+            - env_count: Number of environment variables
+            - background_pids: List of background process PIDs
+            - created_at: Session creation timestamp (if available)
+        
+        Example:
+            sessions = sandbox.list_sessions()
+            for session in sessions:
+                print(f"{session['session_id']}: {session['cwd']}")
+        """
+        sessions_info = []
+        for session_id, session in self._sessions.items():
+            sessions_info.append({
+                "session_id": session_id,
+                "cwd": session.cwd,
+                "env_vars": dict(session.env_vars),  # Copy to avoid mutation
+                "env_count": len(session.env_vars),
+                "background_pids": list(session.background_pids.items()),
+                "background_count": len(session.background_pids)
+            })
+        return sessions_info
+    
+    def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get detailed information about a specific session
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Session info dict or None if session doesn't exist
+        """
+        if session_id not in self._sessions:
+            return None
+        
+        session = self._sessions[session_id]
+        return {
+            "session_id": session_id,
+            "cwd": session.cwd,
+            "env_vars": dict(session.env_vars),
+            "background_pids": list(session.background_pids.items())
+        }
+    
+    def close_session(self, session_id: str) -> bool:
+        """Close and cleanup a session
+        
+        Kills all background processes and removes session state.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            True if session was closed, False if session didn't exist
+            
+        Example:
+            sandbox.close_session("temporary_session")
+        """
+        if session_id not in self._sessions:
+            logger.warning(f"Cannot close non-existent session: {session_id}")
+            return False
+        
+        session = self._sessions[session_id]
+        
+        # Kill all background processes (best effort)
+        for command, pid in session.background_pids.items():
+            try:
+                # Use asyncio.run for sync method
+                import asyncio
+                asyncio.create_task(self._kill_pid(pid))
+                logger.info(f"Killed background PID {pid} from session {session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to kill PID {pid}: {e}")
+        
+        # Remove session
+        del self._sessions[session_id]
+        logger.info(f"Closed session: {session_id}")
+        return True
+    
+    async def _kill_pid(self, pid: int):
+        """Helper to kill a process by PID"""
+        try:
+            await self.exec_command_stateful(f"kill {pid}", session_id=self._default_session_id)
+        except Exception as e:
+            logger.debug(f"Kill PID {pid} failed: {e}")
+    
+    def cleanup_all_sessions(self, exclude: List[str] = None) -> int:
+        """Close all sessions except excluded ones
+        
+        Args:
+            exclude: List of session IDs to keep (e.g., ["default"])
+            
+        Returns:
+            Number of sessions closed
+            
+        Example:
+            # Close all except default
+            count = sandbox.cleanup_all_sessions(exclude=["default"])
+            print(f"Closed {count} sessions")
+        """
+        exclude = exclude or []
+        closed_count = 0
+        
+        session_ids = list(self._sessions.keys())
+        for session_id in session_ids:
+            if session_id not in exclude:
+                if self.close_session(session_id):
+                    closed_count += 1
+        
+        logger.info(f"Cleaned up {closed_count} sessions")
+        return closed_count
+    
+    async def list_background_processes(self, session_id: str = None) -> List[Dict[str, Any]]:
+        """List all background processes, optionally filtered by session
+        
+        Args:
+            session_id: Optional session filter. If None, list from all sessions.
+            
+        Returns:
+            List of background process info:
+            - session_id: Session owning the process
+            - command: Original command
+            - pid: Process ID
+            - running: Whether process is still running (checked via ps)
+            
+        Example:
+            processes = await sandbox.list_background_processes()
+            for proc in processes:
+                print(f"Session {proc['session_id']}: PID {proc['pid']} - {proc['command']}")
+        """
+        processes = []
+        
+        sessions_to_check = [session_id] if session_id else self._sessions.keys()
+        
+        for sid in sessions_to_check:
+            if sid not in self._sessions:
+                continue
+            
+            session = self._sessions[sid]
+            for command, pid in session.background_pids.items():
+                # Check if still running
+                is_running = await self._check_pid_running(pid)
+                processes.append({
+                    "session_id": sid,
+                    "command": command,
+                    "pid": pid,
+                    "running": is_running
+                })
+        
+        return processes
+    
+    async def _check_pid_running(self, pid: int) -> bool:
+        """Check if a PID is still running"""
+        try:
+            result = await self.exec_command_stateful(
+                f"ps -p {pid}",
+                session_id=self._default_session_id
+            )
+            return result["exit_code"] == 0
+        except Exception:
+            return False
+    
+    async def kill_background_process(
+        self, 
+        pid: int = None, 
+        session_id: str = None,
+        pattern: str = None
+    ) -> Dict[str, Any]:
+        """Kill background process(es) by PID, session, or pattern
+        
+        Args:
+            pid: Specific PID to kill
+            session_id: Kill all background processes in this session
+            pattern: Kill processes matching this command pattern
+            
+        Returns:
+            Dict with:
+            - killed_count: Number of processes killed
+            - killed_pids: List of PIDs that were killed
+            
+        Examples:
+            # Kill specific PID
+            await sandbox.kill_background_process(pid=12345)
+            
+            # Kill all processes in session
+            await sandbox.kill_background_process(session_id="temp_session")
+            
+            # Kill processes matching pattern
+            await sandbox.kill_background_process(pattern="http.server")
+        """
+        killed_pids = []
+        
+        if pid:
+            # Kill specific PID
+            try:
+                await self._kill_pid(pid)
+                killed_pids.append(pid)
+                # Remove from tracking
+                for session in self._sessions.values():
+                    to_remove = [cmd for cmd, p in session.background_pids.items() if p == pid]
+                    for cmd in to_remove:
+                        session.remove_background_process(cmd)
+            except Exception as e:
+                logger.error(f"Failed to kill PID {pid}: {e}")
+        
+        elif session_id:
+            # Kill all in session
+            if session_id in self._sessions:
+                session = self._sessions[session_id]
+                for command, p in list(session.background_pids.items()):
+                    try:
+                        await self._kill_pid(p)
+                        killed_pids.append(p)
+                        session.remove_background_process(command)
+                    except Exception as e:
+                        logger.error(f"Failed to kill PID {p}: {e}")
+        
+        elif pattern:
+            # Kill by pattern match
+            for session in self._sessions.values():
+                for command, p in list(session.background_pids.items()):
+                    if pattern in command:
+                        try:
+                            await self._kill_pid(p)
+                            killed_pids.append(p)
+                            session.remove_background_process(command)
+                        except Exception as e:
+                            logger.error(f"Failed to kill PID {p}: {e}")
+        
+        return {
+            "killed_count": len(killed_pids),
+            "killed_pids": killed_pids
+        }
+    
+    async def get_background_logs(self, pid: int) -> Optional[str]:
+        """Get logs from background process output file
+        
+        Background processes are redirected to /tmp/bg_$PID.out
+        
+        Args:
+            pid: Process ID
+            
+        Returns:
+            Log content or None if file doesn't exist
+            
+        Example:
+            logs = await sandbox.get_background_logs(12345)
+            print(logs)
+        """
+        try:
+            result = await self.exec_command_stateful(
+                f"cat /tmp/bg_{pid}.out 2>/dev/null || echo 'No log file'",
+                session_id=self._default_session_id
+            )
+            if result["exit_code"] == 0 and result["stdout"]:
+                return result["stdout"]
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get logs for PID {pid}: {e}")
+            return None
+    
     @property
     def id(self) -> str:
         """Sandbox ID"""
