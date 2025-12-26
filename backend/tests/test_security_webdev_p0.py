@@ -32,7 +32,7 @@ class TestP01CommandValidation:
             self.webdev._validate_command("LD_PRELOAD=/tmp/evil.so python3 server.py")
         
         assert "LD_PRELOAD" in str(exc_info.value)
-        assert "forbidden" in str(exc_info.value).lower()
+        assert "not allowed" in str(exc_info.value).lower()
     
     def test_ld_library_path_injection_blocked(self):
         """Test that LD_LIBRARY_PATH injection is blocked"""
@@ -47,7 +47,7 @@ class TestP01CommandValidation:
             self.webdev._validate_command("PATH=/tmp:$PATH npm run dev")
         
         assert "PATH" in str(exc_info.value)
-        assert "forbidden" in str(exc_info.value).lower()
+        assert "not allowed" in str(exc_info.value).lower()
     
     def test_python_c_argument_blocked(self):
         """Test that python -c (arbitrary code) is blocked"""
