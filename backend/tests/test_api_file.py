@@ -127,7 +127,7 @@ def test_download_file_success(client, authenticated_user, sample_text_file, sam
     file_id = upload_response.json()['data']['file_id']
     
     # Download file
-    download_url = f"/api/v1/files/{file_id}"
+    download_url = f"/api/v1/files/{file_id}/download"
     response = client.get(download_url, headers=headers)
     
     logger.info(f"Download file response: {response.status_code} - Content length: {len(response.content)}")
@@ -219,7 +219,7 @@ def test_upload_binary_file(client, authenticated_user):
     
     # Download and verify content
     file_id = data['data']['file_id']
-    download_url = f"/api/v1/files/{file_id}"
+    download_url = f"/api/v1/files/{file_id}/download"
     download_response = client.get(download_url, headers=headers)
     
     assert download_response.status_code == 200

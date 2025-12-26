@@ -22,9 +22,9 @@ BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 # ==================== FastAPI TestClient ====================
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def client():
-    """Create FastAPI TestClient for API integration tests"""
+    """Create FastAPI TestClient for API integration tests (session-scoped)"""
     from fastapi.testclient import TestClient
     from app.main import app
     

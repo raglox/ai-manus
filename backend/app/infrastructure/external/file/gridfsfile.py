@@ -31,19 +31,19 @@ class GridFSFileStorage(FileStorage):
     
     def _get_gridfs_bucket(self) -> AsyncIOMotorGridFSBucket:
         """Get async GridFS Bucket instance"""
-        if not self.mongodb.client:
-            raise RuntimeError("MongoDB client not initialized")
+        if not self.mongodb._client:
+            raise RuntimeError("MongoDB client not initialized. Call initialize() first.")
         
         # Use database name from configuration
-        database = self.mongodb.client[self.settings.mongodb_database]
+        database = self.mongodb._client[self.settings.mongodb_database]
         return AsyncIOMotorGridFSBucket(database, bucket_name=self.bucket_name)
     
     def _get_files_collection(self):
         """Get files collection for querying file metadata"""
-        if not self.mongodb.client:
-            raise RuntimeError("MongoDB client not initialized")
+        if not self.mongodb._client:
+            raise RuntimeError("MongoDB client not initialized. Call initialize() first.")
         
-        database = self.mongodb.client[self.settings.mongodb_database]
+        database = self.mongodb._client[self.settings.mongodb_database]
         return database[f"{self.bucket_name}.files"]
     
     def _create_file_info(self, file_info: Dict[str, Any], file_id: str) -> FileInfo:
