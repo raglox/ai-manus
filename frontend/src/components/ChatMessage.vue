@@ -26,6 +26,65 @@
         </div>
       </div>
     </div>
+    
+    <!-- Agent Thoughts Section (Reflexion) -->
+    <div 
+      v-if="messageContent.reflection || messageContent.thinking"
+      class="mb-2 border border-yellow-500/30 dark:border-yellow-400/30 rounded-lg overflow-hidden bg-yellow-50/50 dark:bg-yellow-900/10"
+    >
+      <div 
+        @click="isThinkingExpanded = !isThinkingExpanded"
+        class="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-yellow-100/50 dark:hover:bg-yellow-900/20 transition-colors"
+      >
+        <div class="flex items-center gap-2">
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            width="16" 
+            height="16" 
+            viewBox="0 0 24 24" 
+            fill="none" 
+            stroke="currentColor" 
+            stroke-width="2" 
+            stroke-linecap="round" 
+            stroke-linejoin="round"
+            class="text-yellow-600 dark:text-yellow-400"
+          >
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+          <span class="text-sm font-medium text-yellow-800 dark:text-yellow-300">
+            💭 Agent Thoughts
+          </span>
+          <span class="text-xs text-yellow-600/70 dark:text-yellow-400/70">
+            ({{ messageContent.reflection ? 'Reflecting' : 'Thinking' }})
+          </span>
+        </div>
+        <svg 
+          xmlns="http://www.w3.org/2000/svg" 
+          width="20" 
+          height="20" 
+          viewBox="0 0 24 24" 
+          fill="none" 
+          stroke="currentColor" 
+          stroke-width="2" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"
+          class="transition-transform duration-300 text-yellow-600 dark:text-yellow-400"
+          :class="{ 'rotate-180': isThinkingExpanded }"
+        >
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </div>
+      <div 
+        class="px-3 pb-3 text-sm text-yellow-900 dark:text-yellow-100 transition-all duration-300 ease-in-out overflow-hidden"
+        :class="{ 'max-h-[1000px] opacity-100': isThinkingExpanded, 'max-h-0 opacity-0 pb-0': !isThinkingExpanded }"
+      >
+        <div class="prose prose-sm dark:prose-invert prose-yellow max-w-none">
+          <div v-html="renderMarkdown(messageContent.reflection || messageContent.thinking || '')"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Message Content -->
     <div
       class="max-w-none p-0 m-0 prose prose-sm sm:prose-base dark:prose-invert [&_pre:not(.shiki)]:!bg-[var(--fill-tsp-white-light)] [&_pre:not(.shiki)]:text-[var(--text-primary)] text-base text-[var(--text-primary)]"
       v-html="renderMarkdown(messageContent.content)"></div>
@@ -108,6 +167,7 @@ const attachmentsContent = computed(() => props.message.content as AttachmentsCo
 
 // Control content expand/collapse state
 const isExpanded = ref(true);
+const isThinkingExpanded = ref(true); // Reflexion section expanded by default
 
 const { relativeTime } = useRelativeTime();
 

@@ -13,6 +13,9 @@ export interface BaseContent {
 
 export interface MessageContent extends BaseContent {
   content: string;
+  reflection?: string; // Reflexion/self-reflection content
+  thinking?: string;   // Agent thinking process
+  state?: 'IDLE' | 'PLANNING' | 'EXECUTING' | 'REFLECTING' | 'WAITING' | 'COMPLETED' | 'ERROR';
 }
 
 export interface ToolContent extends BaseContent {

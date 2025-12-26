@@ -98,7 +98,7 @@ export const TOOL_ICON_MAP: {[key: string]: any} = {
   "mcp": SearchIcon  // 暂时使用搜索图标，可以后续创建专门的MCP图标
 };
 
-import ShellToolView from '@/components/toolViews/ShellToolView.vue';
+import ShellTerminal from '@/components/ShellTerminal.vue';
 import FileToolView from '@/components/toolViews/FileToolView.vue';
 import SearchToolView from '@/components/toolViews/SearchToolView.vue';
 import BrowserToolView from '@/components/toolViews/BrowserToolView.vue';
@@ -106,9 +106,10 @@ import McpToolView from '@/components/toolViews/McpToolView.vue';
 
 /**
  * Mapping from tool names to components
+ * Note: ShellToolView has been replaced with ShellTerminal (xterm.js integration)
  */
 export const TOOL_COMPONENT_MAP: {[key: string]: any} = {
-  "shell": ShellToolView,
+  "shell": ShellTerminal,
   "file": FileToolView,
   "search": SearchToolView,
   "browser": BrowserToolView,
