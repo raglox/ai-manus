@@ -30,6 +30,10 @@ ALLOWED_SERVER_COMMANDS = {
     'bun', 'pnpm', 'yarn', 'next', 'vite', 'webpack-dev-server'
 }
 
+# Limits for incremental log scanning
+MAX_LOG_BYTES_PER_READ = 65536
+MAX_TOTAL_LOG_BYTES = 5 * 1024 * 1024
+
 
 class WebDevTool(BaseTool):
     """
@@ -71,8 +75,12 @@ class WebDevTool(BaseTool):
         # Extract first word (the actual command)
         first_word = command.strip().split()[0]
         
-        # Remove path if present (e.g., "./node" -> "node")
-        command_name = first_word.split('/')[-1]
+        # Disallow path segments to avoid executing arbitrary binaries
+        if '/' in first_word:
+            raise ValueError("Command must not include path separators or custom binary paths.")
+        
+        # Path separators are blocked above; use the raw command name
+        command_name = first_word
         
         # Check whitelist
         if command_name not in ALLOWED_SERVER_COMMANDS:
@@ -325,10 +333,12 @@ class WebDevTool(BaseTool):
         Returns:
             Detected URL or None
         """
-        # ✅ FIXED: Validate PID
-        if pid is None or pid <= 0:
-            logger.error(f"Invalid PID: {pid}")
+        try:
+            self._validate_pid(pid)
+        except ValueError as e:
+            logger.error(f"Invalid PID: {pid} ({e})")
             return None
+        pid_str = str(int(pid))
         
         # URL detection patterns (with optional paths)
         url_patterns = [
@@ -342,21 +352,30 @@ class WebDevTool(BaseTool):
         # Context keywords that indicate actual server start (not errors)
         server_keywords = ['listening', 'running', 'started', 'ready', 'server', 'app']
         
-        log_file = f"/tmp/bg_{pid}.out"
+        log_file = f"/tmp/bg_{pid_str}.out"
         start_time = time.monotonic()
         last_read_size = 0  # ✅ FIXED: Track position to avoid re-reading
+        empty_reads = 0
         
         while (time.monotonic() - start_time) < timeout_seconds:
             try:
+                if last_read_size > MAX_TOTAL_LOG_BYTES:
+                    logger.warning(f"Aborting URL detection for PID {pid}: log size exceeded {MAX_TOTAL_LOG_BYTES} bytes")
+                    break
                 # ✅ FIXED: Read only NEW log content to prevent memory leak
                 result = await self.sandbox.exec_command_stateful(
-                    f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null || echo ''",
+                    (
+                        f"if [ -f {log_file} ]; then "
+                        f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null | head -c {MAX_LOG_BYTES_PER_READ}; "
+                        f"else echo ''; fi"
+                    ),
                     session_id=session_id
                 )
                 
                 new_logs = result.get("stdout", "")
                 
                 if new_logs:
+                    empty_reads = 0
                     last_read_size += len(new_logs.encode('utf-8'))
                     
                     # ✅ FIXED: Search line by line with context
@@ -377,7 +396,17 @@ class WebDevTool(BaseTool):
                                     url = url.replace('0.0.0.0', 'localhost')
                                     logger.info(f"Detected server URL: {url} (from line: {line.strip()})")
                                     return url
-                
+
+                else:
+                    empty_reads += 1
+                    # If there's nothing new and the process exited, bail out early (check sparingly)
+                    if empty_reads >= 2:
+                        status = await self.sandbox.exec_command_stateful(f"ps -p {pid_str}", session_id=session_id)
+                        if status.get("exit_code", 1) != 0:
+                            logger.warning(f"Process {pid} exited before URL detection")
+                            break
+                        empty_reads = 0
+
                 # Wait before next check
                 await asyncio.sleep(0.5)
                 
