@@ -25,10 +25,7 @@ import time
 import os
 from typing import Dict, Any
 
-# Skip all E2E tests - they need proper Docker environment setup
-pytestmark = pytest.mark.skip(reason="E2E tests require proper Docker sandbox environment")
-
-# Skip if Docker is not available
+# Check if Docker is available
 try:
     import docker
     docker_client = docker.from_env()
