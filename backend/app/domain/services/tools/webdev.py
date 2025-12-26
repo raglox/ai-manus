@@ -54,6 +54,17 @@ FORBIDDEN_ARGS = [
     r'-e\s',           # perl -e (arbitrary code)
 ]
 
+# 🔒 P1-2: SECURITY - Log size limits to prevent DoS
+MAX_LOG_READ_SIZE = 10 * 1024 * 1024      # 10 MB per read operation
+MAX_TOTAL_LOG_SIZE = 100 * 1024 * 1024    # 100 MB total per log file
+
+# 🔒 P1-3: SECURITY - Server limits to prevent resource exhaustion
+MAX_SERVERS_PER_TOOL = 10                  # Maximum servers per tool instance
+
+# 🔒 P1-4: SECURITY - Health check configuration
+HEALTH_CHECK_TIMEOUT = 5                   # Seconds to wait for HTTP health check
+HEALTH_CHECK_MAX_RETRIES = 3               # Maximum retries for health check
+
 
 class WebDevTool(BaseTool):
     """
@@ -82,6 +93,8 @@ class WebDevTool(BaseTool):
         self._started_servers: Dict[int, Dict[str, Any]] = {}
         # 🔒 P1-1: Async lock for race condition protection
         self._server_lock = asyncio.Lock()
+        # 🔒 P1-2: Track total log size per PID for limits
+        self._log_sizes: Dict[int, int] = {}  # PID -> bytes read
     
     def _validate_command(self, command: str) -> None:
         """🔒 P0-1: HARDENED multi-layer command validation.
@@ -305,30 +318,42 @@ class WebDevTool(BaseTool):
                     if owning_pids:
                         logger.info(f"✅ PID {pid} owns port {port}")
             
-            # 🔒 DEFENSE 3: HTTP health check
-            try:
-                health_result = await self.sandbox.exec_command_stateful(
-                    f"curl -s -o /dev/null -w '%{{http_code}}' --connect-timeout 5 --max-time 5 {url} 2>/dev/null || echo '000'",
-                    timeout=10
-                )
-                
-                http_code = health_result.get("stdout", "000").strip()
-                
-                # Accept 2xx (success), 3xx (redirect), 4xx (client error - server is responding)
-                # Reject 000 (connection refused), 5xx (server error)
-                if http_code and http_code[0] in ['2', '3', '4']:
-                    logger.info(f"✅ Port {port} is reachable (HTTP {http_code})")
-                    return True
-                else:
-                    logger.warning(f"⚠️ Port {port} returned HTTP {http_code} (may still be starting up)")
-                    # Still return True if port is listening and owned by correct PID
-                    # Server might be starting up
-                    return True
+            # 🔒 P1-4: HTTP health check with retries
+            for retry in range(HEALTH_CHECK_MAX_RETRIES):
+                try:
+                    health_result = await self.sandbox.exec_command_stateful(
+                        f"curl -s -o /dev/null -w '%{{http_code}}' "
+                        f"--connect-timeout {HEALTH_CHECK_TIMEOUT} "
+                        f"--max-time {HEALTH_CHECK_TIMEOUT} {url} 2>/dev/null || echo '000'",
+                        timeout=HEALTH_CHECK_TIMEOUT + 5
+                    )
                     
-            except Exception as e:
-                logger.warning(f"HTTP health check failed for {url}: {e}")
-                # If netstat and lsof passed, server is probably starting up
-                return True
+                    http_code = health_result.get("stdout", "000").strip()
+                    
+                    # Accept 2xx (success), 3xx (redirect), 4xx (client error - server is responding)
+                    # Reject 000 (connection refused), 5xx (server error)
+                    if http_code and http_code[0] in ['2', '3', '4']:
+                        logger.info(f"✅ Port {port} is reachable (HTTP {http_code}) after {retry + 1} attempt(s)")
+                        return True
+                    else:
+                        if retry < HEALTH_CHECK_MAX_RETRIES - 1:
+                            logger.warning(
+                                f"⚠️ Port {port} returned HTTP {http_code}, "
+                                f"retry {retry + 1}/{HEALTH_CHECK_MAX_RETRIES}..."
+                            )
+                            await asyncio.sleep(1)  # Wait before retry
+                        else:
+                            logger.warning(
+                                f"⚠️ Port {port} returned HTTP {http_code} after {HEALTH_CHECK_MAX_RETRIES} attempts"
+                            )
+                
+                except Exception as e:
+                    logger.warning(f"HTTP health check attempt {retry + 1} failed: {e}")
+                    if retry < HEALTH_CHECK_MAX_RETRIES - 1:
+                        await asyncio.sleep(1)
+            
+            # If netstat and lsof passed, server is probably starting up
+            return True
             
         except Exception as e:
             logger.error(f"Port verification failed: {e}")
@@ -367,6 +392,12 @@ class WebDevTool(BaseTool):
                 failed_pids.append(pid)
         
         logger.info(f"Cleanup complete: {len(stopped_pids)} stopped, {len(failed_pids)} failed")
+        
+        # 🔒 P1-2: Clean up log size tracking
+        async with self._server_lock:
+            for pid in stopped_pids:
+                if pid in self._log_sizes:
+                    del self._log_sizes[pid]
         
         return {
             "stopped_count": len(stopped_pids),
@@ -443,6 +474,26 @@ class WebDevTool(BaseTool):
             # ✅ SECURITY: Validate command before execution
             self._validate_command(command)
             
+            # 🔒 P1-3: Check max server limit
+            async with self._server_lock:
+                server_count = len(self._started_servers)
+            
+            if server_count >= MAX_SERVERS_PER_TOOL:
+                return ToolResult(
+                    success=False,
+                    message=(
+                        f"❌ Maximum server limit reached ({MAX_SERVERS_PER_TOOL} servers).\n\n"
+                        f"Currently running: {server_count} servers\n"
+                        f"Stop some servers before starting new ones.\n\n"
+                        f"Use 'list_servers' to see running servers and 'stop_server' to stop them."
+                    ),
+                    data={
+                        "error": "max_servers_reached",
+                        "current_count": server_count,
+                        "max_allowed": MAX_SERVERS_PER_TOOL
+                    }
+                )
+            
             # Start server in background with & suffix
             logger.info(f"Starting server: {command}")
             
@@ -501,6 +552,9 @@ class WebDevTool(BaseTool):
                         # Clean up tracking
                         if pid in self._started_servers:
                             del self._started_servers[pid]
+                        # 🔒 P1-2: Clean up log size tracking
+                        if pid in self._log_sizes:
+                            del self._log_sizes[pid]
                     
                     return ToolResult(
                         success=False,
@@ -625,18 +679,39 @@ class WebDevTool(BaseTool):
         start_time = time.monotonic()
         last_read_size = 0  # ✅ FIXED: Track position to avoid re-reading
         
+        # 🔒 P1-2: Initialize log size tracking
+        if pid not in self._log_sizes:
+            self._log_sizes[pid] = 0
+        
         while (time.monotonic() - start_time) < timeout_seconds:
             try:
+                # 🔒 P1-2: Check total log size limit
+                if self._log_sizes[pid] >= MAX_TOTAL_LOG_SIZE:
+                    logger.warning(
+                        f"⚠️ Log size limit reached for PID {pid}: "
+                        f"{self._log_sizes[pid]} bytes (max {MAX_TOTAL_LOG_SIZE})"
+                    )
+                    break
+                
                 # ✅ FIXED: Read only NEW log content to prevent memory leak
+                # 🔒 P1-2: Limit read size per operation
+                bytes_to_read = min(
+                    MAX_LOG_READ_SIZE,
+                    MAX_TOTAL_LOG_SIZE - self._log_sizes[pid]
+                )
+                
                 result = await self.sandbox.exec_command_stateful(
-                    f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null || echo ''",
+                    f"head -c {bytes_to_read} <(tail -c +{last_read_size + 1} {log_file}) 2>/dev/null || echo ''",
                     session_id=session_id
                 )
                 
                 new_logs = result.get("stdout", "")
                 
                 if new_logs:
-                    last_read_size += len(new_logs.encode('utf-8'))
+                    bytes_read = len(new_logs.encode('utf-8'))
+                    last_read_size += bytes_read
+                    # 🔒 P1-2: Update total log size tracking
+                    self._log_sizes[pid] = self._log_sizes.get(pid, 0) + bytes_read
                     
                     # ✅ FIXED: Search line by line with context
                     for line in new_logs.split('\n'):
@@ -724,6 +799,9 @@ class WebDevTool(BaseTool):
                 async with self._server_lock:
                     if pid in self._started_servers:
                         del self._started_servers[pid]
+                    # 🔒 P1-2: Clean up log size tracking
+                    if pid in self._log_sizes:
+                        del self._log_sizes[pid]
                 return ToolResult(
                     success=False,
                     message=f"❌ Process {pid} does not exist or already stopped.",
@@ -772,6 +850,9 @@ class WebDevTool(BaseTool):
                     # Remove from tracking
                     if pid in self._started_servers:
                         del self._started_servers[pid]
+                    # 🔒 P1-2: Clean up log size tracking
+                    if pid in self._log_sizes:
+                        del self._log_sizes[pid]
                 
                 # Verify it's actually stopped
                 await asyncio.sleep(0.5)
