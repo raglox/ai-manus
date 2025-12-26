@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 import uuid
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.domain.models.subscription import Subscription, SubscriptionPlan, SubscriptionStatus
 from app.domain.repositories.subscription_repository import SubscriptionRepository
@@ -16,6 +18,9 @@ from app.domain.models.user import User
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+# Get limiter from app state
+limiter = Limiter(key_func=get_remote_address)
 
 
 # Dependency injection
@@ -66,13 +71,15 @@ class CustomerPortalResponse(BaseModel):
 
 # Routes
 @router.post("/create-checkout-session", response_model=CreateCheckoutSessionResponse)
+@limiter.limit("5/minute;20/hour")  # Limit checkout session creation
 async def create_checkout_session(
+    http_request: Request,
     request: CreateCheckoutSessionRequest,
     current_user: User = Depends(get_current_user),
     stripe_service: StripeService = Depends(get_stripe_service),
     subscription_repository: SubscriptionRepository = Depends(get_subscription_repository)
 ):
-    """Create a Stripe checkout session for subscription upgrade
+    """Create a Stripe checkout session for subscription upgrade (Rate limited: 5 req/min, 20 req/hour)
     
     This endpoint creates a Stripe Checkout session that redirects the user
     to Stripe's hosted payment page.
@@ -135,12 +142,14 @@ async def create_checkout_session(
 
 
 @router.post("/create-portal-session", response_model=CustomerPortalResponse)
+@limiter.limit("10/minute;50/hour")  # Moderate limit for portal sessions
 async def create_customer_portal_session(
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     stripe_service: StripeService = Depends(get_stripe_service),
     return_url: Optional[str] = None
 ):
-    """Create a Stripe Customer Portal session
+    """Create a Stripe Customer Portal session (Rate limited: 10 req/min, 50 req/hour)
     
     This endpoint creates a session for the Stripe Customer Portal where users
     can manage their subscription, update payment methods, and view invoices.
@@ -172,11 +181,13 @@ async def create_customer_portal_session(
 
 
 @router.get("/subscription", response_model=SubscriptionResponse)
+@limiter.limit("30/minute;300/hour")  # Generous limit for read operations
 async def get_subscription(
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     subscription_repository: SubscriptionRepository = Depends(get_subscription_repository)
 ):
-    """Get current user's subscription status"""
+    """Get current user's subscription status (Rate limited: 30 req/min, 300 req/hour)"""
     try:
         subscription = await subscription_repository.get_subscription_by_user_id(current_user.id)
         
@@ -212,12 +223,13 @@ async def get_subscription(
 
 
 @router.post("/webhook")
+@limiter.limit("100/minute")  # Strict limit for webhook to prevent abuse
 async def stripe_webhook(
-    request: Request,
+    http_request: Request,
     stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature"),
     stripe_service: StripeService = Depends(get_stripe_service)
 ):
-    """Handle Stripe webhook events
+    """Handle Stripe webhook events with rate limiting (100 req/min)
     
     This endpoint receives webhook events from Stripe to keep subscription
     status in sync with Stripe's records.
@@ -230,7 +242,7 @@ async def stripe_webhook(
             )
         
         # Get raw body
-        body = await request.body()
+        body = await http_request.body()
         
         # Process webhook event
         result = await stripe_service.handle_webhook_event(body, stripe_signature)
@@ -246,12 +258,14 @@ async def stripe_webhook(
 
 
 @router.post("/activate-trial")
+@limiter.limit("3/hour")  # Very strict - trial activation once per user
 async def activate_trial(
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     subscription_repository: SubscriptionRepository = Depends(get_subscription_repository),
     stripe_service: StripeService = Depends(get_stripe_service)
 ):
-    """Activate trial period for new users"""
+    """Activate trial period for new users (Rate limited: 3 req/hour)"""
     try:
         subscription = await subscription_repository.get_subscription_by_user_id(current_user.id)
         

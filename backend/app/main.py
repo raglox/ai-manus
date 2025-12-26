@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 import asyncio
@@ -14,8 +15,11 @@ from app.interfaces.errors.exception_handlers import register_exception_handlers
 from app.infrastructure.models.documents import AgentDocument, SessionDocument, UserDocument, SubscriptionDocument
 from app.infrastructure.middleware import BillingMiddleware
 from app.infrastructure.middleware.rate_limit import SimpleRateLimiter
+from app.infrastructure.middleware.advanced_rate_limit import create_rate_limiter, get_rate_limit
 from app.infrastructure.repositories.subscription_repository import MongoSubscriptionRepository
 from beanie import init_beanie
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
 
 # Initialize logging system
 setup_logging()
@@ -23,6 +27,14 @@ logger = logging.getLogger(__name__)
 
 # Load configuration
 settings = get_settings()
+
+# Initialize Redis-backed Rate Limiter
+redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+if settings.redis_password:
+    redis_url = f"redis://:{settings.redis_password}@{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+
+limiter = create_rate_limiter(redis_url)
+logger.info(f"Rate limiter initialized with Redis backend: {settings.redis_host}:{settings.redis_port}")
 
 
 # Create lifespan context manager
@@ -66,6 +78,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Manus AI Agent", lifespan=lifespan)
 
+# Attach limiter to app for SlowAPI
+app.state.limiter = limiter
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -89,6 +104,19 @@ app.add_middleware(
 
 # Register exception handlers
 register_exception_handlers(app)
+
+# Register rate limit exceeded handler
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request, exc):
+    logger.warning(f"Rate limit exceeded for {request.client.host} on {request.url.path}")
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "Rate limit exceeded",
+            "message": "Too many requests. Please try again later.",
+            "retry_after": exc.detail if hasattr(exc, 'detail') else "60 seconds"
+        }
+    )
 
 # Register routes
 app.include_router(router, prefix="/api/v1")
