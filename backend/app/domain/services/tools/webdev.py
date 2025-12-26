@@ -14,7 +14,8 @@ Reference: https://github.com/OpenHands/software-agent-sdk
 import re
 import time
 import asyncio
-from typing import Optional, Dict, Any, List
+import shlex
+from typing import Optional, Dict, Any, List, Set
 from app.domain.external.sandbox import Sandbox
 from app.domain.services.tools.base import tool, BaseTool
 from app.domain.models.tool_result import ToolResult
@@ -23,12 +24,35 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Security: Allowed server commands (whitelist)
-ALLOWED_SERVER_COMMANDS = {
-    'npm', 'node', 'python', 'python3', 'flask', 'uvicorn',
-    'gunicorn', 'django-admin', 'php', 'ruby', 'rails', 'deno',
-    'bun', 'pnpm', 'yarn', 'next', 'vite', 'webpack-dev-server'
+# 🔒 P0-1: SECURITY - Strict command-to-binary mapping
+ALLOWED_BINARIES = {
+    'npm': '/usr/bin/npm',
+    'node': '/usr/bin/node',
+    'python': '/usr/bin/python',
+    'python3': '/usr/bin/python3',
+    'flask': '/usr/local/bin/flask',
+    'uvicorn': '/usr/local/bin/uvicorn',
+    'gunicorn': '/usr/local/bin/gunicorn',
+    'django-admin': '/usr/local/bin/django-admin',
+    'php': '/usr/bin/php',
+    'ruby': '/usr/bin/ruby',
+    'rails': '/usr/local/bin/rails',
+    'deno': '/usr/bin/deno',
+    'bun': '/usr/bin/bun',
+    'pnpm': '/usr/bin/pnpm',
+    'yarn': '/usr/bin/yarn',
+    'next': '/usr/local/bin/next',
+    'vite': '/usr/local/bin/vite',
+    'webpack-dev-server': '/usr/local/bin/webpack-dev-server'
 }
+
+# 🔒 P0-1: SECURITY - Forbidden argument patterns
+FORBIDDEN_ARGS = [
+    r'-c\s',           # python -c (arbitrary code)
+    r'--eval',         # node --eval (arbitrary code)
+    r'--interactive',  # python -i (interactive shell)
+    r'-e\s',           # perl -e (arbitrary code)
+]
 
 
 class WebDevTool(BaseTool):
@@ -54,10 +78,18 @@ class WebDevTool(BaseTool):
         """
         super().__init__()
         self.sandbox = sandbox
-        self._started_servers: List[int] = []  # ✅ Track started server PIDs for cleanup
+        # 🔒 P0-2: Track servers with metadata (PID -> {start_time, command, port})
+        self._started_servers: Dict[int, Dict[str, Any]] = {}
     
     def _validate_command(self, command: str) -> None:
-        """✅ SECURITY: Validate server command before execution.
+        """🔒 P0-1: HARDENED multi-layer command validation.
+        
+        Defenses:
+        1. Parse command safely with shlex
+        2. Validate binary against whitelist (reject paths)
+        3. Scan for dangerous argument patterns (-c, --eval, etc.)
+        4. Check for environment variable injection (LD_PRELOAD, PATH)
+        5. Filter dangerous shell characters
         
         Args:
             command: Command to validate
@@ -68,29 +100,66 @@ class WebDevTool(BaseTool):
         if not command or not command.strip():
             raise ValueError("Command cannot be empty")
         
-        # Extract first word (the actual command)
-        first_word = command.strip().split()[0]
+        # 🔒 DEFENSE 1: Parse command safely
+        try:
+            parts = shlex.split(command)
+        except ValueError as e:
+            raise ValueError(f"Invalid command syntax: {e}")
         
-        # Remove path if present (e.g., "./node" -> "node")
-        command_name = first_word.split('/')[-1]
+        if not parts:
+            raise ValueError("Command cannot be empty after parsing")
         
-        # Check whitelist
-        if command_name not in ALLOWED_SERVER_COMMANDS:
+        command_name = parts[0]
+        arguments = parts[1:] if len(parts) > 1 else []
+        
+        # 🔒 DEFENSE 2: Reject absolute/relative paths
+        if '/' in command_name:
             raise ValueError(
-                f"Command '{command_name}' is not allowed for web servers. "
-                f"Allowed commands: {', '.join(sorted(ALLOWED_SERVER_COMMANDS))}"
+                f"Absolute or relative paths are not allowed: '{command_name}'. "
+                f"Use binary names only (e.g., 'python3' not '/usr/bin/python3')"
             )
         
-        # Check for dangerous characters
-        dangerous_chars = [';', '|', '&&', '||', '`', '$(']
+        if command_name not in ALLOWED_BINARIES:
+            raise ValueError(
+                f"Command '{command_name}' is not allowed for web servers. "
+                f"Allowed commands: {', '.join(sorted(ALLOWED_BINARIES.keys()))}"
+            )
+        
+        # 🔒 DEFENSE 3: Scan for dangerous argument patterns
+        full_args = ' '.join(arguments)
+        for pattern in FORBIDDEN_ARGS:
+            if re.search(pattern, full_args, re.IGNORECASE):
+                raise ValueError(
+                    f"Command contains forbidden argument pattern matching '{pattern}'. "
+                    f"This could enable arbitrary code execution."
+                )
+        
+        # 🔒 DEFENSE 4: Check for environment variable injection
+        forbidden_env_vars = [
+            'LD_PRELOAD', 'LD_LIBRARY_PATH', 'PATH',
+            'PYTHONPATH', 'NODE_PATH', 'PERL5LIB', 'RUBYLIB'
+        ]
+        
+        for arg in arguments:
+            if '=' in arg and not arg.startswith('--'):
+                # Looks like ENV=value
+                env_name = arg.split('=')[0].upper()
+                if env_name in forbidden_env_vars:
+                    raise ValueError(
+                        f"Setting environment variable '{env_name}' is forbidden. "
+                        f"This could be used for code injection (e.g., LD_PRELOAD attacks)."
+                    )
+        
+        # 🔒 DEFENSE 5: Check for dangerous shell characters
+        dangerous_chars = [';', '|', '&&', '||', '`', '$(', '>', '<', '\n', '\r']
         for char in dangerous_chars:
             if char in command:
                 raise ValueError(
                     f"Command contains dangerous character/sequence: '{char}'. "
-                    f"This could be a security risk."
+                    f"This could be a shell injection vector."
                 )
         
-        logger.debug(f"Command validation passed: {command}")
+        logger.debug(f"✅ Command validation passed: {command}")
     
     def _validate_pid(self, pid: int) -> None:
         """✅ Validate PID.
@@ -107,6 +176,43 @@ class WebDevTool(BaseTool):
             raise ValueError(f"PID must be an integer, got {type(pid)}")
         if pid <= 0:
             raise ValueError(f"PID must be positive, got {pid}")
+    
+    async def _get_process_start_time(self, pid: int) -> Optional[float]:
+        """🔒 P0-2: Get process start time for PID validation.
+        
+        Uses ps command to get process start time.
+        This is critical for detecting PID recycling attacks.
+        
+        Args:
+            pid: Process ID
+            
+        Returns:
+            Process start time as Unix timestamp, or None if process doesn't exist
+        """
+        try:
+            # Get process start time using ps
+            result = await self.sandbox.exec_command_stateful(
+                f"ps -p {pid} -o etimes= 2>/dev/null || echo ''"
+            )
+            
+            if result["exit_code"] != 0 or not result["stdout"].strip():
+                logger.warning(f"Process {pid} not found")
+                return None
+            
+            # etimes = elapsed time in seconds since process started
+            # Calculate start time = current_time - elapsed_time
+            try:
+                elapsed_seconds = int(result["stdout"].strip())
+                start_time = time.time() - elapsed_seconds
+                logger.debug(f"PID {pid} start time: {start_time} (elapsed: {elapsed_seconds}s)")
+                return start_time
+            except (ValueError, AttributeError):
+                logger.warning(f"Could not parse elapsed time for PID {pid}")
+                return time.time()  # Fallback to current time
+            
+        except Exception as e:
+            logger.error(f"Failed to get process start time for PID {pid}: {e}")
+            return None
     
     async def cleanup(self) -> Dict[str, Any]:
         """✅ Cleanup all resources started by this tool.
@@ -235,11 +341,20 @@ class WebDevTool(BaseTool):
                     data={"command": command}
                 )
             
-            # ✅ Track started server
-            self._started_servers.append(pid)
+            # 🔒 P0-2: Get process start time for PID validation
+            start_time = await self._get_process_start_time(pid)
+            if start_time is None:
+                start_time = time.time()  # Fallback to current time
+            
+            # 🔒 P0-2: Track server with metadata
+            self._started_servers[pid] = {
+                "command": command,
+                "start_time": start_time,
+                "session_id": session_id or "default"
+            }
             
             log_file = f"/tmp/bg_{pid}.out"
-            logger.info(f"Server started with PID {pid}, monitoring logs at {log_file}")
+            logger.info(f"✅ Server started: PID={pid}, start_time={start_time}")
             
             # Monitor logs for URL detection
             detected_url = await self._detect_server_url(
@@ -404,37 +519,78 @@ class WebDevTool(BaseTool):
         required=["pid"]
     )
     async def stop_server(self, pid: int) -> ToolResult:
-        """
-        Stop a web server by PID.
+        """🔒 P0-2 HARDENED: Stop server with PID recycling detection.
         
-        ✅ IMPROVED:
-        - PID validation
-        - Check process exists before killing
+        Security enhancements:
+        - P0-2: Validate PID is tracked by this tool
+        - P0-2: Check process start time to detect PID recycling
         - Try SIGTERM first, then SIGKILL if needed
-        - Remove from tracking list
+        - Remove from tracking after successful kill
         
         Args:
             pid: Process ID to kill
             
         Returns:
             ToolResult with success status
-            
-        Example:
-            result = await stop_server(pid=12345)
-            # Result: "✅ Server with PID 12345 stopped successfully"
         """
         try:
-            # ✅ Validate PID
+            # ✅ Validate PID format
             self._validate_pid(pid)
             
-            # Check if process exists
-            check_result = await self.sandbox.exec_command_stateful(f"ps -p {pid}")
-            if check_result["exit_code"] != 0:
+            # 🔒 P0-2: DEFENSE - Check if PID is tracked by this tool
+            if pid not in self._started_servers:
+                return ToolResult(
+                    success=False,
+                    message=f"❌ PID {pid} is not tracked by this tool. Cannot stop for safety.",
+                    data={"pid": pid, "tracked": False}
+                )
+            
+            # Get expected start time from tracking
+            server_metadata = self._started_servers[pid]
+            expected_start_time = server_metadata['start_time']
+            
+            # 🔒 P0-2: DEFENSE - Verify PID hasn't been recycled
+            current_start_time = await self._get_process_start_time(pid)
+            
+            if current_start_time is None:
+                # Process doesn't exist anymore - clean up tracking
+                del self._started_servers[pid]
                 return ToolResult(
                     success=False,
                     message=f"❌ Process {pid} does not exist or already stopped.",
                     data={"pid": pid, "exists": False}
                 )
+            
+            # Allow 2-second tolerance for timing (ps resolution)
+            time_diff = abs(current_start_time - expected_start_time)
+            if time_diff > 2.0:
+                logger.error(
+                    f"🚨 PID RECYCLING DETECTED! PID {pid} start time mismatch: "
+                    f"expected={expected_start_time}, current={current_start_time}, "
+                    f"diff={time_diff}s"
+                )
+                return ToolResult(
+                    success=False,
+                    message=(
+                        f"❌ SECURITY ALERT: PID {pid} validation failed!\n\n"
+                        f"Process start time doesn't match expected value.\n"
+                        f"This could indicate PID recycling (kernel reused PID for different process).\n\n"
+                        f"Expected start time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expected_start_time))}\n"
+                        f"Current start time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_start_time))}\n"
+                        f"Time difference: {time_diff:.1f} seconds\n\n"
+                        f"Refusing to kill for safety. This prevents accidentally killing critical system processes."
+                    ),
+                    data={
+                        "pid": pid,
+                        "expected_start_time": expected_start_time,
+                        "current_start_time": current_start_time,
+                        "time_diff": time_diff,
+                        "error": "pid_recycling_detected",
+                        "security_alert": True
+                    }
+                )
+            
+            logger.info(f"✅ PID {pid} validation passed (time_diff={time_diff:.2f}s)")
             
             # Try to kill the process
             result = await self.sandbox.kill_background_process(pid=pid)
@@ -442,17 +598,16 @@ class WebDevTool(BaseTool):
             killed_count = result.get("killed_count", 0)
             
             if killed_count > 0:
-                # ✅ Remove from tracking
-                if pid in self._started_servers:
-                    self._started_servers.remove(pid)
+                # Remove from tracking
+                del self._started_servers[pid]
                 
                 # Verify it's actually stopped
                 await asyncio.sleep(0.5)
-                recheck = await self.sandbox.exec_command_stateful(f"ps -p {pid}")
+                verify_stop = await self._get_process_start_time(pid)
                 
-                if recheck["exit_code"] == 0:
+                if verify_stop is not None:
                     # Still running! Force kill
-                    logger.warning(f"PID {pid} still running, using SIGKILL")
+                    logger.warning(f"PID {pid} still running after SIGTERM, using SIGKILL")
                     await self.sandbox.exec_command_stateful(f"kill -9 {pid}")
                     return ToolResult(
                         success=True,
@@ -468,7 +623,7 @@ class WebDevTool(BaseTool):
             else:
                 return ToolResult(
                     success=False,
-                    message=f"❌ Failed to stop server with PID {pid}. Process may not exist or already stopped.",
+                    message=f"❌ Failed to stop server with PID {pid}.",
                     data={"pid": pid, "killed_count": 0}
                 )
                 
