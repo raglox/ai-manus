@@ -41,10 +41,10 @@ class TestFullWorkflow:
     @pytest.fixture
     async def sandbox(self):
         """Create a real Docker sandbox instance"""
-        from app.infrastructure.external.sandbox.docker_sandbox import StatefulDockerSandbox
+        from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
         
         # Create sandbox
-        sandbox = StatefulDockerSandbox()
+        sandbox = DockerSandbox()
         await sandbox.initialize()
         
         yield sandbox

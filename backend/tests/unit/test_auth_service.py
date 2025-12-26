@@ -31,8 +31,8 @@ def mock_user_repository():
 def mock_token_service():
     """Mock token service"""
     service = Mock()
-    service.generate_access_token = Mock(return_value="mock_access_token")
-    service.generate_refresh_token = Mock(return_value="mock_refresh_token")
+    service.create_access_token = Mock(return_value="mock_access_token")
+    service.create_refresh_token = Mock(return_value="mock_refresh_token")
     service.verify_token = Mock(return_value={
         "sub": "user123",
         "email": "test@example.com",
@@ -82,7 +82,7 @@ class TestUserRegistration:
         mock_user_repository.create.return_value = sample_user
         
         # Execute
-        result = await auth_service.register(
+        result = await auth_service.register_user(
             fullname="Test User",
             email="test@example.com",
             password="SecurePass123!"
@@ -111,7 +111,7 @@ class TestUserRegistration:
         
         # Execute & Assert
         with pytest.raises((ValidationError, ValidationError, Exception)) as exc_info:
-            await auth_service.register(
+            await auth_service.register_user(
                 fullname="Test User",
                 email="test@example.com",
                 password="SecurePass123!"
@@ -133,7 +133,7 @@ class TestUserRegistration:
         
         for weak_pwd in weak_passwords:
             with pytest.raises((ValidationError, Exception)):
-                await auth_service.register(
+                await auth_service.register_user(
                     fullname="Test User",
                     email="test@example.com",
                     password=weak_pwd
@@ -152,7 +152,7 @@ class TestUserRegistration:
         
         for invalid_email in invalid_emails:
             with pytest.raises((ValidationError, Exception)):
-                await auth_service.register(
+                await auth_service.register_user(
                     fullname="Test User",
                     email=invalid_email,
                     password="SecurePass123!"
@@ -168,7 +168,7 @@ class TestUserRegistration:
         mock_user_repository.find_by_email.return_value = None
         
         with pytest.raises((ValidationError, Exception)):
-            await auth_service.register(
+            await auth_service.register_user(
                 fullname="",
                 email="test@example.com",
                 password="SecurePass123!"
@@ -192,7 +192,7 @@ class TestUserLogin:
         # Mock password verification
         with patch.object(auth_service, '_verify_password', return_value=True):
             # Execute
-            result = await auth_service.login(
+            result = await auth_service.login_with_tokens(
                 email="test@example.com",
                 password="correct_password"
             )
@@ -218,7 +218,7 @@ class TestUserLogin:
         with patch.object(auth_service, '_verify_password', return_value=False):
             # Execute & Assert
             with pytest.raises(UnauthorizedError):
-                await auth_service.login(
+                await auth_service.login_with_tokens(
                     email="test@example.com",
                     password="wrong_password"
                 )
@@ -235,7 +235,7 @@ class TestUserLogin:
         
         # Execute & Assert
         with pytest.raises((UnauthorizedError, ValidationError)):
-            await auth_service.login(
+            await auth_service.login_with_tokens(
                 email="nonexistent@example.com",
                 password="any_password"
             )
@@ -254,7 +254,7 @@ class TestUserLogin:
         
         # Execute & Assert
         with pytest.raises(UnauthorizedError):
-            await auth_service.login(
+            await auth_service.login_with_tokens(
                 email="test@example.com",
                 password="correct_password"
             )
@@ -272,7 +272,7 @@ class TestUserLogin:
         
         with patch.object(auth_service, '_verify_password', return_value=True):
             # Execute
-            await auth_service.login(
+            await auth_service.login_with_tokens(
                 email="test@example.com",
                 password="correct_password"
             )
@@ -485,7 +485,7 @@ class TestEdgeCases:
         for malicious in malicious_inputs:
             # Should sanitize or reject
             try:
-                await auth_service.register(
+                await auth_service.register_user(
                     fullname=malicious,
                     email="test@example.com",
                     password="SecurePass123!"
@@ -501,7 +501,7 @@ class TestEdgeCases:
     ):
         """Test login with empty credentials"""
         with pytest.raises((ValidationError, UnauthorizedError, Exception)):
-            await auth_service.login(email="", password="")
+            await auth_service.login_with_tokens(email="", password="")
     
     @pytest.mark.asyncio
     async def test_concurrent_registrations(
@@ -516,7 +516,7 @@ class TestEdgeCases:
         mock_user_repository.create.side_effect = [sample_user, ValidationError("User exists")]
         
         # First registration should succeed
-        result1 = await auth_service.register(
+        result1 = await auth_service.register_user(
             fullname="Test User",
             email="test@example.com",
             password="SecurePass123!"
@@ -525,7 +525,7 @@ class TestEdgeCases:
         
         # Second should fail
         with pytest.raises((ValidationError, Exception)):
-            await auth_service.register(
+            await auth_service.register_user(
                 fullname="Test User",
                 email="test@example.com",
                 password="SecurePass123!"
@@ -546,7 +546,7 @@ class TestPasswordHashing:
         mock_user_repository.find_by_email.return_value = None
         mock_user_repository.create.return_value = sample_user
         
-        await auth_service.register(
+        await auth_service.register_user(
             fullname="Test User",
             email="test@example.com",
             password="PlainTextPassword"
