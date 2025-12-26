@@ -25,8 +25,9 @@ def mock_session_repository():
 def sample_session():
     """Sample session for testing"""
     return Session(
-        session_id="test_session_123",
+        id="test_session_123",
         user_id="user123",
+            agent_id="agent123",
         title="Test Session",
         status=SessionStatus.PENDING,
         created_at=datetime.utcnow(),
@@ -54,8 +55,9 @@ class TestSessionCreation:
         
         # Assert
         assert result is not None
-        assert result.session_id == "test_session_123"
+        assert result.id == "test_session_123"
         assert result.user_id == "user123"
+        assert result.agent_id == "agent123"
         assert result.status == SessionStatus.PENDING
         mock_session_repository.create.assert_called_once()
     
@@ -66,8 +68,9 @@ class TestSessionCreation:
     ):
         """Test creating session with custom title"""
         custom_session = Session(
-            session_id="session_456",
+            id="session_456",
             user_id="user123",
+            agent_id="agent123",
             title="My Custom Session Title",
             status=SessionStatus.PENDING,
             created_at=datetime.utcnow(),
@@ -88,8 +91,9 @@ class TestSessionCreation:
         """Test creating multiple sessions for same user"""
         sessions = [
             Session(
-                session_id=f"session_{i}",
+                id=f"session_{i}",
                 user_id="user123",
+            agent_id="agent123",
                 title=f"Session {i}",
                 status=SessionStatus.PENDING,
                 created_at=datetime.utcnow(),
@@ -113,8 +117,9 @@ class TestSessionCreation:
         
         for i in range(5):
             session = Session(
-                session_id=f"unique_session_{i}",
+                id=f"unique_session_{i}",
                 user_id="user123",
+            agent_id="agent123",
                 title=f"Session {i}",
                 status=SessionStatus.PENDING,
                 created_at=datetime.utcnow(),
@@ -122,7 +127,7 @@ class TestSessionCreation:
             )
             mock_session_repository.create.return_value = session
             result = await mock_session_repository.create(session)
-            ids.add(result.session_id)
+            ids.add(result.id)
         
         # All IDs should be unique
         assert len(ids) == 5
@@ -146,7 +151,7 @@ class TestSessionRetrieval:
         
         # Assert
         assert result is not None
-        assert result.session_id == "test_session_123"
+        assert result.id == "test_session_123"
         mock_session_repository.find_by_id.assert_called_once_with("test_session_123")
     
     @pytest.mark.asyncio
@@ -174,8 +179,9 @@ class TestSessionRetrieval:
         # Setup
         sessions = [
             Session(
-                session_id=f"session_{i}",
+                id=f"session_{i}",
                 user_id="user123",
+            agent_id="agent123",
                 title=f"Session {i}",
                 status=SessionStatus.PENDING,
                 created_at=datetime.utcnow(),
@@ -367,12 +373,12 @@ class TestSessionStatus:
         sample_session.status = SessionStatus.RUNNING
         
         # Transition
-        sample_session.status = SessionStatus.STOPPED
+        sample_session.status = SessionStatus.COMPLETED
         mock_session_repository.update.return_value = sample_session
         
         result = await mock_session_repository.update(sample_session)
         
-        assert result.status == SessionStatus.STOPPED
+        assert result.status == SessionStatus.COMPLETED
     
     @pytest.mark.asyncio
     async def test_status_running_to_error(
@@ -384,12 +390,12 @@ class TestSessionStatus:
         sample_session.status = SessionStatus.RUNNING
         
         # Transition on error
-        sample_session.status = SessionStatus.ERROR
+        sample_session.status = SessionStatus.WAITING
         mock_session_repository.update.return_value = sample_session
         
         result = await mock_session_repository.update(sample_session)
         
-        assert result.status == SessionStatus.ERROR
+        assert result.status == SessionStatus.WAITING
 
 
 class TestSessionSharing:
@@ -503,8 +509,9 @@ class TestEdgeCases:
         """Test session with very long title"""
         long_title = "A" * 1000
         session = Session(
-            session_id="session_long_title",
+            id="session_long_title",
             user_id="user123",
+            agent_id="agent123",
             title=long_title,
             status=SessionStatus.PENDING,
             created_at=datetime.utcnow(),
@@ -532,8 +539,9 @@ class TestEdgeCases:
         
         for title in special_titles:
             session = Session(
-                session_id=f"session_{hash(title)}",
+                id=f"session_{hash(title)}",
                 user_id="user123",
+                agent_id="agent123",
                 title=title,
                 status=SessionStatus.PENDING,
                 created_at=datetime.utcnow(),

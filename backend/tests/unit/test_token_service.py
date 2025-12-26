@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch, AsyncMock
 import jwt
 from app.application.services.token_service import TokenService
 from app.core.config import get_settings
+from app.domain.models.user import User, UserRole
 
 settings = get_settings()
 
@@ -19,23 +20,24 @@ def token_service():
 
 
 @pytest.fixture
-def sample_user_data():
-    """Sample user data for testing"""
-    return {
-        "id": "test_user_123",
-        "fullname": "Test User",
-        "email": "test@example.com",
-        "role": "user",
-        "is_active": True
-    }
+def sample_user():
+    """Sample user for testing"""
+    return User(
+        id="test_user_123",
+        fullname="Test User",
+        email="test@example.com",
+        password_hash="hashed_password",
+        role=UserRole.USER,
+        is_active=True
+    )
 
 
 class TestTokenGeneration:
     """Test token generation functionality"""
     
-    def test_generate_access_token_success(self, token_service, sample_user_data):
+    def test_create_access_token_success(self, token_service, sample_user):
         """Test successful access token generation"""
-        token = token_service.generate_access_token(sample_user_data)
+        token = token_service.create_access_token(sample_user)
         
         assert token is not None
         assert isinstance(token, str)
@@ -47,13 +49,13 @@ class TestTokenGeneration:
             settings.jwt_secret_key, 
             algorithms=[settings.jwt_algorithm]
         )
-        assert payload["sub"] == sample_user_data["id"]
-        assert payload["email"] == sample_user_data["email"]
+        assert payload["sub"] == sample_user["id"]
+        assert payload["email"] == sample_user["email"]
         assert payload["type"] == "access"
     
-    def test_generate_refresh_token_success(self, token_service, sample_user_data):
+    def test_create_refresh_token_success(self, token_service, sample_user):
         """Test successful refresh token generation"""
-        token = token_service.generate_refresh_token(sample_user_data)
+        token = token_service.create_refresh_token(sample_user)
         
         assert token is not None
         assert isinstance(token, str)
@@ -64,13 +66,13 @@ class TestTokenGeneration:
             algorithms=[settings.jwt_algorithm]
         )
         assert payload["type"] == "refresh"
-        assert payload["sub"] == sample_user_data["id"]
+        assert payload["sub"] == sample_user["id"]
     
-    def test_generate_token_with_custom_expiry(self, token_service, sample_user_data):
+    def test_generate_token_with_custom_expiry(self, token_service, sample_user):
         """Test token generation with custom expiry"""
         custom_expiry = timedelta(hours=1)
-        token = token_service.generate_access_token(
-            sample_user_data, 
+        token = token_service.create_access_token(
+            sample_user, 
             expires_delta=custom_expiry
         )
         
@@ -92,28 +94,28 @@ class TestTokenGeneration:
         incomplete_data = {"email": "test@example.com"}
         
         with pytest.raises((KeyError, Exception)):
-            token_service.generate_access_token(incomplete_data)
+            token_service.create_access_token(incomplete_data)
 
 
 class TestTokenVerification:
     """Test token verification functionality"""
     
-    def test_verify_valid_token(self, token_service, sample_user_data):
+    def test_verify_valid_token(self, token_service, sample_user):
         """Test verification of valid token"""
-        token = token_service.generate_access_token(sample_user_data)
+        token = token_service.create_access_token(sample_user)
         payload = token_service.verify_token(token)
         
         assert payload is not None
-        assert payload["sub"] == sample_user_data["id"]
-        assert payload["email"] == sample_user_data["email"]
+        assert payload["sub"] == sample_user["id"]
+        assert payload["email"] == sample_user["email"]
     
-    def test_verify_expired_token(self, token_service, sample_user_data):
+    def test_verify_expired_token(self, token_service, sample_user):
         """Test verification of expired token"""
         # Generate token with past expiry
         expired_token = jwt.encode(
             {
-                "sub": sample_user_data["id"],
-                "email": sample_user_data["email"],
+                "sub": sample_user["id"],
+                "email": sample_user["email"],
                 "exp": datetime.utcnow() - timedelta(hours=1),
                 "iat": datetime.utcnow() - timedelta(hours=2)
             },
@@ -131,12 +133,12 @@ class TestTokenVerification:
         
         assert payload is None
     
-    def test_verify_token_wrong_secret(self, token_service, sample_user_data):
+    def test_verify_token_wrong_secret(self, token_service, sample_user):
         """Test verification of token signed with wrong secret"""
         wrong_token = jwt.encode(
             {
-                "sub": sample_user_data["id"],
-                "email": sample_user_data["email"],
+                "sub": sample_user["id"],
+                "email": sample_user["email"],
                 "exp": datetime.utcnow() + timedelta(hours=1)
             },
             "wrong_secret_key",
@@ -163,16 +165,16 @@ class TestTokenVerification:
 class TestGetUserFromToken:
     """Test user extraction from token"""
     
-    def test_get_user_from_valid_token(self, token_service, sample_user_data):
+    def test_get_user_from_valid_token(self, token_service, sample_user):
         """Test extracting user from valid token"""
-        token = token_service.generate_access_token(sample_user_data)
+        token = token_service.create_access_token(sample_user)
         user = token_service.get_user_from_token(token)
         
         assert user is not None
-        assert user["id"] == sample_user_data["id"]
-        assert user["email"] == sample_user_data["email"]
-        assert user["fullname"] == sample_user_data["fullname"]
-        assert user["role"] == sample_user_data["role"]
+        assert user["id"] == sample_user["id"]
+        assert user["email"] == sample_user["email"]
+        assert user["fullname"] == sample_user["fullname"]
+        assert user["role"] == sample_user["role"]
     
     def test_get_user_from_invalid_token(self, token_service):
         """Test extracting user from invalid token"""
@@ -180,14 +182,14 @@ class TestGetUserFromToken:
         
         assert user is None
     
-    def test_get_user_from_expired_token(self, token_service, sample_user_data):
+    def test_get_user_from_expired_token(self, token_service, sample_user):
         """Test extracting user from expired token"""
         expired_token = jwt.encode(
             {
-                "sub": sample_user_data["id"],
-                "email": sample_user_data["email"],
-                "fullname": sample_user_data["fullname"],
-                "role": sample_user_data["role"],
+                "sub": sample_user["id"],
+                "email": sample_user["email"],
+                "fullname": sample_user["fullname"],
+                "role": sample_user["role"],
                 "exp": datetime.utcnow() - timedelta(hours=1)
             },
             settings.jwt_secret_key,
@@ -201,10 +203,10 @@ class TestGetUserFromToken:
 class TestTokenRefresh:
     """Test token refresh functionality"""
     
-    def test_refresh_token_flow(self, token_service, sample_user_data):
+    def test_refresh_token_flow(self, token_service, sample_user):
         """Test complete refresh token flow"""
         # Generate refresh token
-        refresh_token = token_service.generate_refresh_token(sample_user_data)
+        refresh_token = token_service.create_refresh_token(sample_user)
         
         # Verify it's valid
         payload = token_service.verify_token(refresh_token)
@@ -212,7 +214,7 @@ class TestTokenRefresh:
         assert payload["type"] == "refresh"
         
         # Use it to generate new access token
-        new_access_token = token_service.generate_access_token(sample_user_data)
+        new_access_token = token_service.create_access_token(sample_user)
         assert new_access_token is not None
         
         # Verify new access token
@@ -224,9 +226,9 @@ class TestTokenBlacklist:
     """Test token blacklist functionality (if implemented)"""
     
     @pytest.mark.asyncio
-    async def test_blacklist_token(self, token_service, sample_user_data):
+    async def test_blacklist_token(self, token_service, sample_user):
         """Test adding token to blacklist"""
-        token = token_service.generate_access_token(sample_user_data)
+        token = token_service.create_access_token(sample_user)
         
         # If blacklist is implemented
         if hasattr(token_service, 'blacklist_token'):
@@ -244,12 +246,12 @@ class TestEdgeCases:
     def test_empty_user_data(self, token_service):
         """Test with empty user data"""
         with pytest.raises((ValueError, KeyError, Exception)):
-            token_service.generate_access_token({})
+            token_service.create_access_token({})
     
     def test_none_user_data(self, token_service):
         """Test with None user data"""
         with pytest.raises((TypeError, AttributeError, Exception)):
-            token_service.generate_access_token(None)
+            token_service.create_access_token(None)
     
     def test_verify_empty_token(self, token_service):
         """Test verification with empty token"""
@@ -279,17 +281,17 @@ class TestEdgeCases:
 class TestTokenPerformance:
     """Test token service performance"""
     
-    def test_generate_many_tokens(self, token_service, sample_user_data, benchmark):
+    def test_generate_many_tokens(self, token_service, sample_user, benchmark):
         """Benchmark token generation"""
         def generate():
-            return token_service.generate_access_token(sample_user_data)
+            return token_service.create_access_token(sample_user)
         
         result = benchmark(generate)
         assert result is not None
     
-    def test_verify_many_tokens(self, token_service, sample_user_data, benchmark):
+    def test_verify_many_tokens(self, token_service, sample_user, benchmark):
         """Benchmark token verification"""
-        token = token_service.generate_access_token(sample_user_data)
+        token = token_service.create_access_token(sample_user)
         
         def verify():
             return token_service.verify_token(token)
