@@ -650,7 +650,7 @@ class DockerSandbox(Sandbox):
         background_sanitizers = ""
         if is_background:
             safe_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            # PATH is reset explicitly above; the remaining high-risk variables are unset.
+            # PATH is reset via safe_path; the remaining high-risk variables are unset.
             unset_vars = " ".join(sorted(var for var in DANGEROUS_ENV_VARS if var != "PATH"))
             background_sanitizers = f"""
 # Reset sensitive environment for background commands to prevent hijack

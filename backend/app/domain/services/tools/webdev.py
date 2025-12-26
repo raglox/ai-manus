@@ -30,6 +30,10 @@ ALLOWED_SERVER_COMMANDS = {
     'bun', 'pnpm', 'yarn', 'next', 'vite', 'webpack-dev-server'
 }
 
+# Limits for incremental log scanning
+MAX_LOG_BYTES_PER_READ = 65536
+MAX_TOTAL_LOG_BYTES = 5 * 1024 * 1024
+
 
 class WebDevTool(BaseTool):
     """
@@ -334,6 +338,7 @@ class WebDevTool(BaseTool):
         except ValueError as e:
             logger.error(f"Invalid PID: {pid} ({e})")
             return None
+        pid_str = str(int(pid))
         
         # URL detection patterns (with optional paths)
         url_patterns = [
@@ -347,23 +352,21 @@ class WebDevTool(BaseTool):
         # Context keywords that indicate actual server start (not errors)
         server_keywords = ['listening', 'running', 'started', 'ready', 'server', 'app']
         
-        log_file = f"/tmp/bg_{pid}.out"
+        log_file = f"/tmp/bg_{pid_str}.out"
         start_time = time.monotonic()
         last_read_size = 0  # ✅ FIXED: Track position to avoid re-reading
-        max_bytes_per_read = 65536  # Cap per-read size to avoid log flooding stalls
-        max_total_bytes = 5 * 1024 * 1024  # Hard stop for excessive output
         empty_reads = 0
         
         while (time.monotonic() - start_time) < timeout_seconds:
             try:
-                if last_read_size > max_total_bytes:
-                    logger.warning(f"Aborting URL detection for PID {pid}: log size exceeded {max_total_bytes} bytes")
+                if last_read_size > MAX_TOTAL_LOG_BYTES:
+                    logger.warning(f"Aborting URL detection for PID {pid}: log size exceeded {MAX_TOTAL_LOG_BYTES} bytes")
                     break
                 # ✅ FIXED: Read only NEW log content to prevent memory leak
                 result = await self.sandbox.exec_command_stateful(
                     (
                         f"if [ -f {log_file} ]; then "
-                        f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null | head -c {max_bytes_per_read}; "
+                        f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null | head -c {MAX_LOG_BYTES_PER_READ}; "
                         f"else echo ''; fi"
                     ),
                     session_id=session_id
@@ -398,7 +401,7 @@ class WebDevTool(BaseTool):
                     empty_reads += 1
                     # If there's nothing new and the process exited, bail out early (check sparingly)
                     if empty_reads >= 2:
-                        status = await self.sandbox.exec_command_stateful(f"ps -p {pid}", session_id=session_id)
+                        status = await self.sandbox.exec_command_stateful(f"ps -p {pid_str}", session_id=session_id)
                         if status.get("exit_code", 1) != 0:
                             logger.warning(f"Process {pid} exited before URL detection")
                             break
