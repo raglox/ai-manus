@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     email_from: str | None = None
     
     # JWT configuration
-    jwt_secret_key: str = "your-secret-key-here"  # Should be set in production
+    jwt_secret_key: str  # REQUIRED - Must be set in environment variables
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
@@ -80,8 +80,25 @@ class Settings(BaseSettings):
         
     def validate(self):
         """Validate configuration settings"""
+        # Critical secrets validation
         if not self.api_key:
             raise ValueError("API key is required")
+        
+        if not self.jwt_secret_key or self.jwt_secret_key == "your-secret-key-here":
+            raise ValueError("JWT_SECRET_KEY must be set in environment variables. Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))'")
+        
+        if len(self.jwt_secret_key) < 32:
+            raise ValueError("JWT_SECRET_KEY must be at least 32 characters long for security")
+        
+        # Stripe validation for production
+        if self.stripe_secret_key and not self.stripe_webhook_secret:
+            import logging
+            logging.warning("STRIPE_WEBHOOK_SECRET not set - webhook verification will fail!")
+        
+        # Password salt validation
+        if self.auth_provider == "password" and not self.password_salt:
+            import logging
+            logging.warning("PASSWORD_SALT not set - using default (not recommended for production)")
 
 @lru_cache()
 def get_settings() -> Settings:
