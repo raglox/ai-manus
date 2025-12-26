@@ -3,6 +3,7 @@ export * from './client';
 export * from './auth';
 export * from './agent';
 export * from './file';
+export * from './billing';
 
 // Export commonly used types and functions
 export type { ApiResponse, ApiError } from './client';
@@ -18,6 +19,14 @@ export type {
   AuthStatusResponse,
   UserRole
 } from './auth';
+export type {
+  Subscription,
+  CreateCheckoutSessionRequest,
+  CreateCheckoutSessionResponse,
+  CustomerPortalResponse,
+  TrialActivationResponse
+} from './billing';
+export { SubscriptionPlan, SubscriptionStatus } from './billing';
 
 // Import and re-export auth initialization function
 import { initializeAuth } from './auth';

@@ -12,6 +12,7 @@ import HomePage from './pages/HomePage.vue'
 import ChatPage from './pages/ChatPage.vue'
 import LoginPage from './pages/LoginPage.vue'
 import MainLayout from './pages/MainLayout.vue'
+import SubscriptionSettings from './views/SubscriptionSettings.vue'
 import { configure } from "vue-gtag";
 import SharePage from './pages/SharePage.vue';
 import ShareLayout from './pages/ShareLayout.vue';
@@ -41,6 +42,11 @@ export const router = createRouter({
           meta: { requiresAuth: true }
         }
       ]
+    },
+    {
+      path: '/settings/subscription',
+      component: SubscriptionSettings,
+      meta: { requiresAuth: true }
     },
     {
       path: '/share',
