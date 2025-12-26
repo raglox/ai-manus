@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "description": "File system operations",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/workspace"
+      ],
+      "env": {}
+    },
+    "echo": {
+      "description": "Simple echo server for testing",
+      "command": "python3",
+      "args": [
+        "-c",
+        "\nimport sys\nimport json\n\n# Simple MCP echo server\nwhile True:\n    try:\n        line = sys.stdin.readline()\n        if not line:\n            break\n        \n        request = json.loads(line)\n        request_id = request.get('id')\n        method = request.get('method')\n        params = request.get('params', {})\n        \n        if method == 'initialize':\n            response = {\n                'jsonrpc': '2.0',\n                'id': request_id,\n                'result': {\n                    'protocolVersion': '2024-11-05',\n                    'capabilities': {'tools': {}},\n                    'serverInfo': {'name': 'echo', 'version': '1.0.0'}\n                }\n            }\n        elif method == 'tools/list':\n            response = {\n                'jsonrpc': '2.0',\n                'id': request_id,\n                'result': {\n                    'tools': [{\n                        'name': 'echo',\n                        'description': 'Echo back the input',\n                        'inputSchema': {\n                            'type': 'object',\n                            'properties': {\n                                'message': {'type': 'string', 'description': 'Message to echo'}\n                            },\n                            'required': ['message']\n                        }\n                    }]\n                }\n            }\n        elif method == 'tools/call':\n            tool_name = params.get('name')\n            arguments = params.get('arguments', {})\n            response = {\n                'jsonrpc': '2.0',\n                'id': request_id,\n                'result': {\n                    'content': [{\n                        'type': 'text',\n                        'text': f'Echo: {arguments.get(\"message\", \"\")}'\n                    }]\n                }\n            }\n        else:\n            response = {\n                'jsonrpc': '2.0',\n                'id': request_id,\n                'result': {}\n            }\n        \n        print(json.dumps(response), flush=True)\n    except Exception as e:\n        error_response = {\n            'jsonrpc': '2.0',\n            'id': request_id if 'request_id' in locals() else None,\n            'error': {'code': -32603, 'message': str(e)}\n        }\n        print(json.dumps(error_response), flush=True)\n"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
