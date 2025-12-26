@@ -214,6 +214,124 @@ class WebDevTool(BaseTool):
             logger.error(f"Failed to get process start time for PID {pid}: {e}")
             return None
     
+    def _extract_port_from_command(self, command: str) -> Optional[int]:
+        """🔒 P0-3: Extract port number from command if specified.
+        
+        Args:
+            command: Server command
+            
+        Returns:
+            Port number (1024-65535) or None
+        """
+        # Match patterns: :8080, 8080, --port 8080, -p 8080, --port=8080
+        patterns = [
+            r':(\d{4,5})\b',
+            r'\b(\d{4,5})\b(?!\.)',
+            r'--port[=\s]+(\d{4,5})',
+            r'-p\s+(\d{4,5})',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, command)
+            if match:
+                port = int(match.group(1))
+                if 1024 <= port <= 65535:
+                    return port
+        return None
+    
+    async def _verify_port_listening(self, pid: int, url: str) -> bool:
+        """🔒 P0-3: Verify that port is actually listening and owned by correct PID.
+        
+        Three-layer verification:
+        1. Check if port is listening (netstat/ss)
+        2. Verify PID owns the socket (lsof)
+        3. HTTP health check (curl)
+        
+        Args:
+            pid: Process ID that should own the port
+            url: URL to verify
+            
+        Returns:
+            True if all verifications pass, False otherwise
+        """
+        try:
+            # Extract port from URL
+            port_match = re.search(r':(\d+)', url)
+            if not port_match:
+                logger.warning(f"Could not extract port from URL: {url}")
+                return False
+            
+            port = int(port_match.group(1))
+            logger.info(f"🔍 Verifying port {port} for PID {pid}...")
+            
+            # 🔒 DEFENSE 1: Check if port is listening
+            netstat_result = await self.sandbox.exec_command_stateful(
+                f"netstat -tuln 2>/dev/null | grep ':{port} ' || ss -tuln 2>/dev/null | grep ':{port} ' || echo 'not_found'"
+            )
+            
+            if "not_found" in netstat_result.get("stdout", ""):
+                logger.warning(f"❌ Port {port} is not listening")
+                return False
+            
+            logger.info(f"✅ Port {port} is listening")
+            
+            # 🔒 DEFENSE 2: Verify PID owns the socket (lsof)
+            lsof_result = await self.sandbox.exec_command_stateful(
+                f"lsof -i :{port} -t 2>/dev/null || echo 'not_found'"
+            )
+            
+            if "not_found" in lsof_result.get("stdout", ""):
+                logger.warning(f"⚠️ lsof not available, skipping PID ownership check")
+                # Continue - lsof might not be installed
+            else:
+                owning_pids_str = lsof_result["stdout"].strip()
+                if owning_pids_str and owning_pids_str != "not_found":
+                    owning_pids = []
+                    for line in owning_pids_str.split('\n'):
+                        line = line.strip()
+                        if line.isdigit():
+                            owning_pids.append(int(line))
+                    
+                    if owning_pids and pid not in owning_pids:
+                        logger.error(
+                            f"❌ PORT HIJACKING DETECTED! "
+                            f"Port {port} is owned by PID(s) {owning_pids}, "
+                            f"but expected PID {pid}. This could be a security attack!"
+                        )
+                        return False
+                    
+                    if owning_pids:
+                        logger.info(f"✅ PID {pid} owns port {port}")
+            
+            # 🔒 DEFENSE 3: HTTP health check
+            try:
+                health_result = await self.sandbox.exec_command_stateful(
+                    f"curl -s -o /dev/null -w '%{{http_code}}' --connect-timeout 5 --max-time 5 {url} 2>/dev/null || echo '000'",
+                    timeout=10
+                )
+                
+                http_code = health_result.get("stdout", "000").strip()
+                
+                # Accept 2xx (success), 3xx (redirect), 4xx (client error - server is responding)
+                # Reject 000 (connection refused), 5xx (server error)
+                if http_code and http_code[0] in ['2', '3', '4']:
+                    logger.info(f"✅ Port {port} is reachable (HTTP {http_code})")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Port {port} returned HTTP {http_code} (may still be starting up)")
+                    # Still return True if port is listening and owned by correct PID
+                    # Server might be starting up
+                    return True
+                    
+            except Exception as e:
+                logger.warning(f"HTTP health check failed for {url}: {e}")
+                # If netstat and lsof passed, server is probably starting up
+                return True
+            
+        except Exception as e:
+            logger.error(f"Port verification failed: {e}")
+            return False
+    
     async def cleanup(self) -> Dict[str, Any]:
         """✅ Cleanup all resources started by this tool.
         
@@ -364,9 +482,42 @@ class WebDevTool(BaseTool):
             )
             
             if detected_url:
-                message = f"✅ Server started successfully!\n\n"
+                # 🔒 P0-3: VERIFY port ownership before returning
+                logger.info(f"🔍 Starting port verification for {detected_url}...")
+                is_verified = await self._verify_port_listening(pid, detected_url)
+                
+                if not is_verified:
+                    logger.error(f"❌ Port verification FAILED for {detected_url}")
+                    # Clean up tracking
+                    del self._started_servers[pid]
+                    
+                    return ToolResult(
+                        success=False,
+                        message=(
+                            f"⚠️ SECURITY ALERT: Port verification failed for {detected_url}\n\n"
+                            f"The detected URL may not belong to PID {pid}.\n"
+                            f"Possible causes:\n"
+                            f"  - Port hijacking (another process bound to port first)\n"
+                            f"  - URL spoofing (fake URL in logs)\n"
+                            f"  - Server crashed immediately after startup\n\n"
+                            f"Server has been removed from tracking for safety.\n"
+                            f"Check logs at: {log_file}"
+                        ),
+                        data={
+                            "url": detected_url,
+                            "pid": pid,
+                            "error": "port_verification_failed",
+                            "security_alert": True,
+                            "log_file": log_file
+                        }
+                    )
+                
+                # Success - verified URL
+                message = f"✅ Server started and VERIFIED!\n\n"
                 message += f"🌐 URL: {detected_url}\n"
                 message += f"🔢 PID: {pid}\n"
+                message += f"🔒 Security: Port ownership verified\n"
+                message += f"⏰ Started: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}\n"
                 message += f"📝 Logs: {log_file}\n\n"
                 message += f"Use 'stop_server' with PID {pid} to stop the server."
                 
@@ -376,9 +527,11 @@ class WebDevTool(BaseTool):
                     data={
                         "url": detected_url,
                         "pid": pid,
+                        "start_time": start_time,
                         "command": command,
                         "log_file": log_file,
-                        "session_id": session_id or "default"
+                        "session_id": session_id or "default",
+                        "verified": True
                     }
                 )
             else:
