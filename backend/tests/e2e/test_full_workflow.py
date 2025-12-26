@@ -43,9 +43,8 @@ class TestFullWorkflow:
         """Create a real Docker sandbox instance"""
         from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
         
-        # Create sandbox
+        # Create sandbox (no initialize needed - automatic on first use)
         sandbox = DockerSandbox()
-        await sandbox.initialize()
         
         yield sandbox
         
@@ -99,7 +98,7 @@ class TestFullWorkflow:
 </html>"""
         
         # Write file using sandbox
-        result = await sandbox.execute_command(
+        result = await sandbox.exec_command(
             f'cat > /tmp/index.html << \'EOF\'\n{html_content}\nEOF',
             cwd='/tmp'
         )
@@ -107,7 +106,7 @@ class TestFullWorkflow:
         print("✅ index.html created successfully")
         
         # Verify file exists
-        result = await sandbox.execute_command('ls -la /tmp/index.html', cwd='/tmp')
+        result = await sandbox.exec_command('ls -la /tmp/index.html', cwd='/tmp')
         assert result['exit_code'] == 0, "index.html not found"
         assert 'index.html' in result['stdout']
         print("✅ File verified on disk")
@@ -143,7 +142,7 @@ class TestFullWorkflow:
         print("\n[Step 4] Testing server response with curl...")
         max_retries = 5
         for attempt in range(max_retries):
-            result = await sandbox.execute_command(
+            result = await sandbox.exec_command(
                 f'curl -s -o /dev/null -w "%{{http_code}}" --connect-timeout 3 --max-time 5 {server_url}',
                 cwd='/tmp'
             )
@@ -161,7 +160,7 @@ class TestFullWorkflow:
         
         # Verify HTML content
         print("\n[Step 4b] Fetching HTML content...")
-        result = await sandbox.execute_command(
+        result = await sandbox.exec_command(
             f'curl -s {server_url}/index.html',
             cwd='/tmp'
         )
@@ -186,7 +185,7 @@ class TestFullWorkflow:
         # Verify server no longer responds
         print("\n[Step 6] Verifying server is down...")
         await asyncio.sleep(1)
-        result = await sandbox.execute_command(
+        result = await sandbox.exec_command(
             f'curl -s -o /dev/null -w "%{{http_code}}" --connect-timeout 2 --max-time 3 {server_url} 2>&1 || echo "FAILED"',
             cwd='/tmp'
         )
@@ -212,7 +211,7 @@ class TestFullWorkflow:
         print("="*70)
         
         # Check if npm is available
-        result = await sandbox.execute_command('which npm', cwd='/tmp')
+        result = await sandbox.exec_command('which npm', cwd='/tmp')
         if result['exit_code'] != 0:
             pytest.skip("npm not available in sandbox")
         
@@ -228,7 +227,7 @@ class TestFullWorkflow:
   }
 }"""
         
-        result = await sandbox.execute_command(
+        result = await sandbox.exec_command(
             f'cat > /tmp/package.json << \'EOF\'\n{package_json}\nEOF',
             cwd='/tmp'
         )
@@ -255,7 +254,7 @@ class TestFullWorkflow:
         # Wait and verify
         await asyncio.sleep(3)
         
-        result = await sandbox.execute_command(
+        result = await sandbox.exec_command(
             f'curl -s -o /dev/null -w "%{{http_code}}" --connect-timeout 3 {server_url}',
             cwd='/tmp'
         )
@@ -311,7 +310,7 @@ class TestFullWorkflow:
         
         # Test both servers
         for pid, port in [(pid1, 8001), (pid2, 8002)]:
-            result = await sandbox.execute_command(
+            result = await sandbox.exec_command(
                 f'curl -s -o /dev/null -w "%{{http_code}}" --connect-timeout 3 http://localhost:{port}',
                 cwd='/tmp'
             )
