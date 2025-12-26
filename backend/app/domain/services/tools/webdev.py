@@ -80,6 +80,8 @@ class WebDevTool(BaseTool):
         self.sandbox = sandbox
         # 🔒 P0-2: Track servers with metadata (PID -> {start_time, command, port})
         self._started_servers: Dict[int, Dict[str, Any]] = {}
+        # 🔒 P1-1: Async lock for race condition protection
+        self._server_lock = asyncio.Lock()
     
     def _validate_command(self, command: str) -> None:
         """🔒 P0-1: HARDENED multi-layer command validation.
@@ -346,11 +348,16 @@ class WebDevTool(BaseTool):
         stopped_pids = []
         failed_pids = []
         
-        logger.info(f"Cleaning up {len(self._started_servers)} tracked servers...")
+        # 🔒 P1-1: Acquire lock to get snapshot of PIDs
+        async with self._server_lock:
+            pids_to_stop = list(self._started_servers.keys())
+            server_count = len(pids_to_stop)
         
-        for pid in list(self._started_servers):  # Copy list to avoid modification during iteration
+        logger.info(f"Cleaning up {server_count} tracked servers...")
+        
+        for pid in pids_to_stop:  # Iterate over snapshot
             try:
-                result = await self.stop_server(pid)
+                result = await self.stop_server(pid)  # stop_server has its own lock
                 if result.success:
                     stopped_pids.append(pid)
                 else:
@@ -464,12 +471,13 @@ class WebDevTool(BaseTool):
             if start_time is None:
                 start_time = time.time()  # Fallback to current time
             
-            # 🔒 P0-2: Track server with metadata
-            self._started_servers[pid] = {
-                "command": command,
-                "start_time": start_time,
-                "session_id": session_id or "default"
-            }
+            # 🔒 P1-1: Acquire lock before modifying _started_servers
+            async with self._server_lock:
+                self._started_servers[pid] = {
+                    "command": command,
+                    "start_time": start_time,
+                    "session_id": session_id or "default"
+                }
             
             log_file = f"/tmp/bg_{pid}.out"
             logger.info(f"✅ Server started: PID={pid}, start_time={start_time}")
@@ -488,8 +496,11 @@ class WebDevTool(BaseTool):
                 
                 if not is_verified:
                     logger.error(f"❌ Port verification FAILED for {detected_url}")
-                    # Clean up tracking
-                    del self._started_servers[pid]
+                    # 🔒 P1-1: Acquire lock before deleting
+                    async with self._server_lock:
+                        # Clean up tracking
+                        if pid in self._started_servers:
+                            del self._started_servers[pid]
                     
                     return ToolResult(
                         success=False,
@@ -690,24 +701,29 @@ class WebDevTool(BaseTool):
             # ✅ Validate PID format
             self._validate_pid(pid)
             
-            # 🔒 P0-2: DEFENSE - Check if PID is tracked by this tool
-            if pid not in self._started_servers:
-                return ToolResult(
-                    success=False,
-                    message=f"❌ PID {pid} is not tracked by this tool. Cannot stop for safety.",
-                    data={"pid": pid, "tracked": False}
-                )
-            
-            # Get expected start time from tracking
-            server_metadata = self._started_servers[pid]
-            expected_start_time = server_metadata['start_time']
+            # 🔒 P1-1: Acquire lock for atomic check-read-delete operation
+            async with self._server_lock:
+                # 🔒 P0-2: DEFENSE - Check if PID is tracked by this tool
+                if pid not in self._started_servers:
+                    return ToolResult(
+                        success=False,
+                        message=f"❌ PID {pid} is not tracked by this tool. Cannot stop for safety.",
+                        data={"pid": pid, "tracked": False}
+                    )
+                
+                # Get expected start time from tracking
+                server_metadata = self._started_servers[pid]
+                expected_start_time = server_metadata['start_time']
             
             # 🔒 P0-2: DEFENSE - Verify PID hasn't been recycled
             current_start_time = await self._get_process_start_time(pid)
             
             if current_start_time is None:
                 # Process doesn't exist anymore - clean up tracking
-                del self._started_servers[pid]
+                # 🔒 P1-1: Acquire lock before deleting
+                async with self._server_lock:
+                    if pid in self._started_servers:
+                        del self._started_servers[pid]
                 return ToolResult(
                     success=False,
                     message=f"❌ Process {pid} does not exist or already stopped.",
@@ -751,8 +767,11 @@ class WebDevTool(BaseTool):
             killed_count = result.get("killed_count", 0)
             
             if killed_count > 0:
-                # Remove from tracking
-                del self._started_servers[pid]
+                # 🔒 P1-1: Acquire lock before deleting
+                async with self._server_lock:
+                    # Remove from tracking
+                    if pid in self._started_servers:
+                        del self._started_servers[pid]
                 
                 # Verify it's actually stopped
                 await asyncio.sleep(0.5)
