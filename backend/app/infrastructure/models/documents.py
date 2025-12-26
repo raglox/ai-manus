@@ -8,6 +8,7 @@ from app.domain.models.event import AgentEvent
 from app.domain.models.session import Session, SessionStatus
 from app.domain.models.file import FileInfo
 from app.domain.models.user import User, UserRole
+from app.domain.models.subscription import Subscription, SubscriptionPlan, SubscriptionStatus
 from pymongo import IndexModel, ASCENDING
 
 T = TypeVar('T', bound=BaseModel)
@@ -102,4 +103,45 @@ class SessionDocument(BaseDocument[Session], id_field="session_id", domain_model
         indexes = [
             "session_id",
             "user_id",  # Add index for user_id for efficient queries
+        ]
+
+
+class SubscriptionDocument(BaseDocument[Subscription], id_field="subscription_id", domain_model_class=Subscription):
+    """MongoDB document for Subscription"""
+    subscription_id: str
+    user_id: str
+    plan: SubscriptionPlan = SubscriptionPlan.FREE
+    status: SubscriptionStatus = SubscriptionStatus.ACTIVE
+    
+    # Stripe integration
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    stripe_price_id: Optional[str] = None
+    
+    # Billing details
+    current_period_start: Optional[datetime] = None
+    current_period_end: Optional[datetime] = None
+    cancel_at_period_end: bool = False
+    canceled_at: Optional[datetime] = None
+    
+    # Usage limits
+    monthly_agent_runs: int = 0
+    monthly_agent_runs_limit: int = 10
+    
+    # Trial
+    trial_start: Optional[datetime] = None
+    trial_end: Optional[datetime] = None
+    is_trial: bool = False
+    
+    # Timestamps
+    created_at: datetime = datetime.now(timezone.utc)
+    updated_at: datetime = datetime.now(timezone.utc)
+    
+    class Settings:
+        name = "subscriptions"
+        indexes = [
+            "subscription_id",
+            IndexModel([("user_id", ASCENDING)], unique=True),  # One subscription per user
+            "stripe_customer_id",
+            "stripe_subscription_id",
         ]
