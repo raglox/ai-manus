@@ -646,11 +646,11 @@ class DockerSandbox(Sandbox):
         # 3. Execute command
         # 4. Capture new CWD and ENV changes
         
-        safe_env_vars = {k: v for k, v in session.env_vars.items() if k not in DANGEROUS_ENV_VARS}
-        env_exports = " ".join([f"export {k}={v};" for k, v in safe_env_vars.items()])
+        env_exports = " ".join([f"export {k}={v};" for k, v in session.env_vars.items()])
         background_sanitizers = ""
         if is_background:
             safe_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            # PATH is reset explicitly above; the remaining high-risk variables are unset.
             unset_vars = " ".join(sorted(var for var in DANGEROUS_ENV_VARS if var != "PATH"))
             background_sanitizers = f"""
 # Reset sensitive environment for background commands to prevent hijack

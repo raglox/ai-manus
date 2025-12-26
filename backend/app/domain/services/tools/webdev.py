@@ -329,9 +329,10 @@ class WebDevTool(BaseTool):
         Returns:
             Detected URL or None
         """
-        # ✅ FIXED: Validate PID
-        if pid is None or pid <= 0:
-            logger.error(f"Invalid PID: {pid}")
+        try:
+            self._validate_pid(pid)
+        except ValueError as e:
+            logger.error(f"Invalid PID: {pid} ({e})")
             return None
         
         # URL detection patterns (with optional paths)
