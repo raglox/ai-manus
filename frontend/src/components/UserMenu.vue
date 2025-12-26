@@ -41,6 +41,16 @@
                                 class="overflow-hidden flex-1 text-sm font-medium leading-5 whitespace-nowrap text-ellipsis">{{
                                 t('Settings') }}</span>
                         </div>
+                        <div
+                            class="flex gap-3 items-center p-2 rounded-lg cursor-pointer text-[var(--text-primary)] hover:bg-[var(--fill-tsp-white-main)]"
+                            @click="handleSubscriptionClick">
+                            <div class="flex-shrink-0 w-5 h-5">
+                                <CreditCard :size="20" />
+                            </div>
+                            <span
+                                class="overflow-hidden flex-1 text-sm font-medium leading-5 whitespace-nowrap text-ellipsis">{{
+                                t('Subscription') }}</span>
+                        </div>
                         <div class="w-full h-[1px] my-1 bg-[var(--border-main)]"></div>
                         <div v-if="authProvider !== 'none'"
                             class="flex gap-3 items-center p-2 rounded-lg cursor-pointer hover:bg-[var(--fill-tsp-white-main)] text-[var(--function-error)]"
@@ -66,7 +76,7 @@ import { useI18n } from 'vue-i18n';
 import { useAuth } from '../composables/useAuth';
 import { useSettingsDialog } from '../composables/useSettingsDialog';
 import { getCachedAuthProvider } from '../api/auth';
-import { LogOut, User, Settings2 } from 'lucide-vue-next';
+import { LogOut, User, Settings2, CreditCard } from 'lucide-vue-next';
 
 const router = useRouter();
 const { t } = useI18n();
@@ -87,6 +97,11 @@ const handleAccountClick = () => {
 // Handle Settings click - open settings dialog with settings tab
 const handleSettingsClick = () => {
     openSettingsDialog('settings');
+};
+
+// Handle Subscription click - navigate to subscription page
+const handleSubscriptionClick = () => {
+    router.push('/settings/subscription');
 };
 
 // Handle logout action
