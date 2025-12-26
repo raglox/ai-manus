@@ -18,6 +18,16 @@ from app.domain.external.llm import LLM
 
 logger = logging.getLogger(__name__)
 
+DANGEROUS_ENV_VARS = {
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "PYTHONPATH",
+    "PATH",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+}
+
 
 class StatefulSession:
     """
@@ -352,8 +362,13 @@ class DockerSandbox(Sandbox):
             print(logs)
         """
         try:
+            max_bytes = 200000  # hard cap to avoid unbounded log reads
             result = await self.exec_command_stateful(
-                f"cat /tmp/bg_{pid}.out 2>/dev/null || echo 'No log file'",
+                (
+                    f"if [ -f /tmp/bg_{pid}.out ]; then "
+                    f"tail -c {max_bytes} /tmp/bg_{pid}.out; "
+                    f"else echo 'No log file'; fi"
+                ),
                 session_id=self._default_session_id
             )
             if result["exit_code"] == 0 and result["stdout"]:
@@ -615,6 +630,10 @@ class DockerSandbox(Sandbox):
             session_id = self._default_session_id
             
         session = self._get_or_create_session(session_id)
+        # Purge high-risk environment overrides before building exports
+        for blocked_var in list(session.env_vars.keys()):
+            if blocked_var in DANGEROUS_ENV_VARS:
+                session.env_vars.pop(blocked_var, None)
         
         # Check if command should run in background
         is_background = command.strip().endswith('&')
@@ -627,14 +646,30 @@ class DockerSandbox(Sandbox):
         # 3. Execute command
         # 4. Capture new CWD and ENV changes
         
-        env_exports = " ".join([f"export {k}={v};" for k, v in session.env_vars.items()])
+        safe_env_vars = {k: v for k, v in session.env_vars.items() if k not in DANGEROUS_ENV_VARS}
+        env_exports = " ".join([f"export {k}={v};" for k, v in safe_env_vars.items()])
+        background_sanitizers = ""
+        if is_background:
+            background_sanitizers = """
+# Reset sensitive environment for background commands to prevent hijack
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+unset LD_PRELOAD LD_LIBRARY_PATH DYLD_LIBRARY_PATH PYTHONPATH NODE_OPTIONS NODE_PATH
+"""
         
         if is_background:
             # For background processes, capture PID
             wrapped_command = f"""
 cd {session.cwd} || true
 {env_exports}
-nohup {command} > /tmp/bg_$$.out 2>&1 & echo $!
+{background_sanitizers}
+LOG_FILE="/tmp/bg_$$.out"
+: > "$LOG_FILE"
+nohup {command} > "$LOG_FILE" 2>&1 &
+PID=$!
+SAFE_LOG="/tmp/bg_${{PID}}.out"
+rm -f "$SAFE_LOG"
+mv "$LOG_FILE" "$SAFE_LOG" 2>/dev/null || cp "$LOG_FILE" "$SAFE_LOG"
+echo $PID
 pwd
 """
         else:
@@ -691,6 +726,9 @@ exit $EXIT_CODE
                 # Extract export statements
                 exports = re.findall(r'export\s+(\w+)=([^\s;]+)', command)
                 for key, value in exports:
+                    if key in DANGEROUS_ENV_VARS:
+                        logger.warning(f"Refused to persist dangerous ENV variable: {key}")
+                        continue
                     session.set_env(key, value.strip('"').strip("'"))
             
             result_dict = {

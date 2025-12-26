@@ -71,6 +71,10 @@ class WebDevTool(BaseTool):
         # Extract first word (the actual command)
         first_word = command.strip().split()[0]
         
+        # Disallow path segments to avoid executing arbitrary binaries
+        if '/' in first_word:
+            raise ValueError("Command must not include path separators or custom binary paths.")
+        
         # Remove path if present (e.g., "./node" -> "node")
         command_name = first_word.split('/')[-1]
         
@@ -345,12 +349,21 @@ class WebDevTool(BaseTool):
         log_file = f"/tmp/bg_{pid}.out"
         start_time = time.monotonic()
         last_read_size = 0  # ✅ FIXED: Track position to avoid re-reading
+        max_bytes_per_read = 65536  # Cap per-read size to avoid log flooding stalls
+        max_total_bytes = 5 * 1024 * 1024  # Hard stop for excessive output
         
         while (time.monotonic() - start_time) < timeout_seconds:
             try:
+                if last_read_size > max_total_bytes:
+                    logger.warning(f"Aborting URL detection for PID {pid}: log size exceeded {max_total_bytes} bytes")
+                    break
                 # ✅ FIXED: Read only NEW log content to prevent memory leak
                 result = await self.sandbox.exec_command_stateful(
-                    f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null || echo ''",
+                    (
+                        f"if [ -f {log_file} ]; then "
+                        f"tail -c +{last_read_size + 1} {log_file} 2>/dev/null | head -c {max_bytes_per_read}; "
+                        f"else echo ''; fi"
+                    ),
                     session_id=session_id
                 )
                 
@@ -377,7 +390,14 @@ class WebDevTool(BaseTool):
                                     url = url.replace('0.0.0.0', 'localhost')
                                     logger.info(f"Detected server URL: {url} (from line: {line.strip()})")
                                     return url
-                
+
+                else:
+                    # If there's nothing new and the process exited, bail out early
+                    status = await self.sandbox.exec_command_stateful(f"ps -p {pid}", session_id=session_id)
+                    if status.get("exit_code", 1) != 0:
+                        logger.warning(f"Process {pid} exited before URL detection")
+                        break
+
                 # Wait before next check
                 await asyncio.sleep(0.5)
                 
