@@ -168,22 +168,35 @@ class StripeService:
             raise Exception(f"Failed to create portal session: {str(e)}")
     
     async def handle_webhook_event(self, payload: bytes, signature: str) -> Dict[str, Any]:
-        """Handle Stripe webhook events
+        """Handle Stripe webhook events with signature verification
+        
+        Security: Verifies webhook signature to ensure events come from Stripe.
+        Rejects any webhook with invalid signature to prevent unauthorized access.
         
         Args:
-            payload: Webhook payload
-            signature: Stripe signature header
+            payload: Webhook payload (raw bytes)
+            signature: Stripe signature header (Stripe-Signature)
             
         Returns:
             Dict with processing result
+            
+        Raises:
+            Exception: If signature verification fails or processing errors occur
         """
+        # Check if webhook secret is configured
+        if not self.webhook_secret:
+            logger.error("STRIPE_WEBHOOK_SECRET not configured - cannot verify webhook")
+            raise Exception("Webhook secret not configured")
+        
         try:
-            # Verify webhook signature
+            # Verify webhook signature - this is CRITICAL for security
+            # stripe.Webhook.construct_event() will raise SignatureVerificationError
+            # if the signature is invalid or if the webhook secret doesn't match
             event = stripe.Webhook.construct_event(
                 payload, signature, self.webhook_secret
             )
             
-            logger.info(f"Processing Stripe webhook event: {event['type']}")
+            logger.info(f"✅ Valid Stripe webhook received: {event['type']} (ID: {event.get('id', 'unknown')})")
             
             # Handle different event types
             if event['type'] == 'checkout.session.completed':
@@ -209,8 +222,15 @@ class StripeService:
                 return {"status": "ignored", "event_type": event['type']}
                 
         except stripe.error.SignatureVerificationError as e:
-            logger.error(f"Webhook signature verification failed: {str(e)}")
+            # This is a CRITICAL security error - someone is trying to send fake webhooks!
+            logger.error(f"🚨 SECURITY: Webhook signature verification failed! {str(e)}")
+            logger.error(f"🚨 Possible attack attempt or incorrect webhook secret configuration")
             raise Exception("Invalid webhook signature")
+        
+        except ValueError as e:
+            # Invalid payload format
+            logger.error(f"Invalid webhook payload format: {str(e)}")
+            raise Exception(f"Invalid webhook payload: {str(e)}")
         
         except Exception as e:
             logger.error(f"Failed to process webhook event: {str(e)}")

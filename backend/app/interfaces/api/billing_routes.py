@@ -73,7 +73,7 @@ class CustomerPortalResponse(BaseModel):
 @router.post("/create-checkout-session", response_model=CreateCheckoutSessionResponse)
 @limiter.limit("5/minute;20/hour")  # Limit checkout session creation
 async def create_checkout_session(
-    http_request: Request,
+    req: Request,  # Required for rate limiting (renamed to avoid conflict with CreateCheckoutSessionRequest)
     request: CreateCheckoutSessionRequest,
     current_user: User = Depends(get_current_user),
     stripe_service: StripeService = Depends(get_stripe_service),
@@ -144,7 +144,7 @@ async def create_checkout_session(
 @router.post("/create-portal-session", response_model=CustomerPortalResponse)
 @limiter.limit("10/minute;50/hour")  # Moderate limit for portal sessions
 async def create_customer_portal_session(
-    http_request: Request,
+    request: Request,  # Required for rate limiting
     current_user: User = Depends(get_current_user),
     stripe_service: StripeService = Depends(get_stripe_service),
     return_url: Optional[str] = None
@@ -183,7 +183,7 @@ async def create_customer_portal_session(
 @router.get("/subscription", response_model=SubscriptionResponse)
 @limiter.limit("30/minute;300/hour")  # Generous limit for read operations
 async def get_subscription(
-    http_request: Request,
+    request: Request,  # Required for rate limiting
     current_user: User = Depends(get_current_user),
     subscription_repository: SubscriptionRepository = Depends(get_subscription_repository)
 ):
@@ -225,42 +225,64 @@ async def get_subscription(
 @router.post("/webhook")
 @limiter.limit("100/minute")  # Strict limit for webhook to prevent abuse
 async def stripe_webhook(
-    http_request: Request,
+    request: Request,  # Required for rate limiting
     stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature"),
     stripe_service: StripeService = Depends(get_stripe_service)
 ):
-    """Handle Stripe webhook events with rate limiting (100 req/min)
+    """Handle Stripe webhook events with signature verification and rate limiting
+    
+    Security: Requires valid Stripe-Signature header for all webhook events.
+    Rate limited to 100 requests/minute to prevent abuse.
     
     This endpoint receives webhook events from Stripe to keep subscription
-    status in sync with Stripe's records.
+    status in sync with Stripe's records. All webhooks are verified using
+    the Stripe signature to prevent unauthorized or fake webhook events.
     """
     try:
+        # Validate signature header presence
         if not stripe_signature:
+            logger.warning("⚠️ Webhook request received without Stripe-Signature header")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing Stripe-Signature header"
             )
         
-        # Get raw body
-        body = await http_request.body()
+        # Get raw body (must be raw bytes for signature verification)
+        body = await request.body()
         
-        # Process webhook event
+        # Process webhook event (signature verification happens inside)
         result = await stripe_service.handle_webhook_event(body, stripe_signature)
         
+        logger.info(f"✅ Webhook processed successfully: {result.get('status')}")
         return result
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+        
     except Exception as e:
-        logger.error(f"Failed to process webhook: {str(e)}")
+        error_msg = str(e)
+        
+        # Check if it's a signature verification error (security-critical)
+        if "signature" in error_msg.lower():
+            logger.error(f"🚨 SECURITY: Webhook signature verification failed")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid webhook signature"
+            )
+        
+        # Other processing errors
+        logger.error(f"Failed to process webhook: {error_msg}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail=f"Webhook processing failed: {error_msg}"
         )
 
 
 @router.post("/activate-trial")
 @limiter.limit("3/hour")  # Very strict - trial activation once per user
 async def activate_trial(
-    http_request: Request,
+    request: Request,  # Required for rate limiting
     current_user: User = Depends(get_current_user),
     subscription_repository: SubscriptionRepository = Depends(get_subscription_repository),
     stripe_service: StripeService = Depends(get_stripe_service)

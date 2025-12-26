@@ -281,8 +281,23 @@ async def get_session_files(
     current_user: Optional[User] = Depends(get_optional_current_user),
     agent_service: AgentService = Depends(get_agent_service)
 ) -> APIResponse[List[FileInfo]]:
-    if not current_user and not await agent_service.is_session_shared(session_id):
-        raise UnauthorizedError()
+    """Get session files with proper ownership verification
+    
+    Security: Verifies that authenticated users can only access their own sessions,
+    or that unauthenticated users can only access shared sessions.
+    """
+    if current_user:
+        # Verify user owns this session
+        session = await agent_service.get_session(session_id, current_user.id)
+        if not session:
+            logger.warning(f"User {current_user.id} attempted to access session {session_id} without ownership")
+            raise UnauthorizedError("Session not found or access denied")
+    else:
+        # For non-authenticated users, check if session is shared
+        if not await agent_service.is_session_shared(session_id):
+            logger.warning(f"Unauthenticated access attempt to non-shared session {session_id}")
+            raise UnauthorizedError("This session is not publicly shared")
+    
     files = await agent_service.get_session_files(session_id, current_user.id if current_user else None)
     return APIResponse.success(files)
 
