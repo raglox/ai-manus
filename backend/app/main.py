@@ -4,6 +4,9 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 import asyncio
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 from app.core.config import get_settings
 from app.infrastructure.storage.mongodb import get_mongodb
@@ -27,6 +30,31 @@ logger = logging.getLogger(__name__)
 
 # Load configuration
 settings = get_settings()
+
+# Initialize Sentry for error tracking and performance monitoring
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        integrations=[
+            FastApiIntegration(transaction_style="url"),
+            LoggingIntegration(
+                level=logging.INFO,  # Capture info and above as breadcrumbs
+                event_level=logging.ERROR  # Send errors as events
+            ),
+        ],
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        profiles_sample_rate=settings.sentry_profiles_sample_rate,
+        environment=settings.sentry_environment,
+        # Set release version from environment or default
+        release=f"manus-backend@{settings.sentry_environment}",
+        # Send PII (Personally Identifiable Information) - set to False in production
+        send_default_pii=False,
+        # Before send hook to filter sensitive data
+        before_send=lambda event, hint: event,  # Can add filtering logic here
+    )
+    logger.info(f"✅ Sentry initialized for environment: {settings.sentry_environment}")
+else:
+    logger.warning("⚠️ Sentry DSN not configured - error tracking disabled")
 
 # Initialize Redis-backed Rate Limiter
 redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"

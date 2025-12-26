@@ -23,6 +23,7 @@ mcp>=1.9.0
 pyjwt[crypto]>=2.8.0
 cryptography>=3.4.8
 stripe>=8.0.0
+sentry-sdk[fastapi]>=1.40.0  # Error tracking and performance monitoring
 # Data processing libraries for enhanced file tools
 pandas>=2.0.0
 openpyxl>=3.1.0

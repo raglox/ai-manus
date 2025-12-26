@@ -122,3 +122,67 @@ async def version_info():
         "build_time": os.getenv("BUILD_TIME", "unknown"),
         "environment": os.getenv("ENVIRONMENT", "development")
     }
+
+
+@router.get("/sentry-test", status_code=status.HTTP_200_OK)
+async def sentry_test():
+    """
+    Test Sentry error tracking
+    
+    DEVELOPMENT ONLY - Remove in production!
+    Triggers a test error to verify Sentry is capturing exceptions
+    """
+    import sentry_sdk
+    
+    # Check if Sentry is configured
+    if not sentry_sdk.Hub.current.client:
+        return {
+            "status": "error",
+            "message": "Sentry not configured. Set SENTRY_DSN in environment."
+        }
+    
+    # Log info (captured as breadcrumb)
+    logger.info("Sentry test initiated")
+    
+    # Capture a test message
+    sentry_sdk.capture_message("Sentry test message from health endpoint", level="info")
+    
+    # Capture a test exception
+    try:
+        # This will be caught and sent to Sentry
+        1 / 0
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        logger.error(f"Test exception captured by Sentry: {e}")
+    
+    return {
+        "status": "success",
+        "message": "Test error and message sent to Sentry. Check your Sentry dashboard.",
+        "sentry_configured": True
+    }
+
+
+@router.get("/sentry-debug", status_code=status.HTTP_200_OK)
+async def sentry_debug():
+    """
+    Debug endpoint to check Sentry configuration
+    
+    Returns Sentry initialization status without triggering errors
+    """
+    import sentry_sdk
+    
+    hub = sentry_sdk.Hub.current
+    client = hub.client
+    
+    if not client:
+        return {
+            "sentry_configured": False,
+            "message": "Sentry DSN not set. Set SENTRY_DSN in environment variables."
+        }
+    
+    return {
+        "sentry_configured": True,
+        "environment": os.getenv("SENTRY_ENVIRONMENT", "production"),
+        "dsn_set": bool(os.getenv("SENTRY_DSN")),
+        "message": "Sentry is configured and ready to capture errors"
+    }

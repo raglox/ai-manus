@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     stripe_price_id_basic: str | None = None
     stripe_price_id_pro: str | None = None
     
+    # Sentry error tracking configuration
+    sentry_dsn: str | None = None
+    sentry_environment: str = "production"
+    sentry_traces_sample_rate: float = 0.1  # 10% performance monitoring
+    sentry_profiles_sample_rate: float = 0.1  # 10% profiling
+    
     # Logging configuration
     log_level: str = "INFO"
     
