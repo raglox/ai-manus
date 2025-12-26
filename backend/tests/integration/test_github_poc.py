@@ -45,7 +45,21 @@ class TestGitHubMCPPOC:
         # Set token in environment for MCP subprocess
         os.environ["GITHUB_TOKEN"] = GITHUB_TOKEN
         
-        manager = McpConnectionManager(config_path=str(MCP_CONFIG_PATH))
+        # Create a mock sandbox (GitHub MCP server runs externally via npx)
+        from unittest.mock import AsyncMock, MagicMock
+        
+        mock_sandbox = MagicMock()
+        mock_sandbox.exec_command_stateful = AsyncMock(return_value={
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": ""
+        })
+        
+        manager = McpConnectionManager(
+            sandbox=mock_sandbox,
+            session_id="test-github-poc",
+            config_path=str(MCP_CONFIG_PATH)
+        )
         
         print(f"\n{'='*70}")
         print("Initializing MCP Manager with GitHub Server")
