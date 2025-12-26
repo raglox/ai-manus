@@ -75,8 +75,8 @@ class WebDevTool(BaseTool):
         if '/' in first_word:
             raise ValueError("Command must not include path separators or custom binary paths.")
         
-        # Remove path if present (e.g., "./node" -> "node")
-        command_name = first_word.split('/')[-1]
+        # Path separators are blocked above; use the raw command name
+        command_name = first_word
         
         # Check whitelist
         if command_name not in ALLOWED_SERVER_COMMANDS:
@@ -351,6 +351,7 @@ class WebDevTool(BaseTool):
         last_read_size = 0  # ✅ FIXED: Track position to avoid re-reading
         max_bytes_per_read = 65536  # Cap per-read size to avoid log flooding stalls
         max_total_bytes = 5 * 1024 * 1024  # Hard stop for excessive output
+        empty_reads = 0
         
         while (time.monotonic() - start_time) < timeout_seconds:
             try:
@@ -370,6 +371,7 @@ class WebDevTool(BaseTool):
                 new_logs = result.get("stdout", "")
                 
                 if new_logs:
+                    empty_reads = 0
                     last_read_size += len(new_logs.encode('utf-8'))
                     
                     # ✅ FIXED: Search line by line with context
@@ -392,11 +394,14 @@ class WebDevTool(BaseTool):
                                     return url
 
                 else:
-                    # If there's nothing new and the process exited, bail out early
-                    status = await self.sandbox.exec_command_stateful(f"ps -p {pid}", session_id=session_id)
-                    if status.get("exit_code", 1) != 0:
-                        logger.warning(f"Process {pid} exited before URL detection")
-                        break
+                    empty_reads += 1
+                    # If there's nothing new and the process exited, bail out early (check sparingly)
+                    if empty_reads >= 2:
+                        status = await self.sandbox.exec_command_stateful(f"ps -p {pid}", session_id=session_id)
+                        if status.get("exit_code", 1) != 0:
+                            logger.warning(f"Process {pid} exited before URL detection")
+                            break
+                        empty_reads = 0
 
                 # Wait before next check
                 await asyncio.sleep(0.5)

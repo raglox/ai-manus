@@ -650,10 +650,12 @@ class DockerSandbox(Sandbox):
         env_exports = " ".join([f"export {k}={v};" for k, v in safe_env_vars.items()])
         background_sanitizers = ""
         if is_background:
-            background_sanitizers = """
+            safe_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            unset_vars = " ".join(sorted(var for var in DANGEROUS_ENV_VARS if var != "PATH"))
+            background_sanitizers = f"""
 # Reset sensitive environment for background commands to prevent hijack
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-unset LD_PRELOAD LD_LIBRARY_PATH DYLD_LIBRARY_PATH PYTHONPATH NODE_OPTIONS NODE_PATH
+export PATH="{safe_path}"
+unset {unset_vars}
 """
         
         if is_background:
