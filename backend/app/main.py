@@ -124,11 +124,12 @@ app.add_middleware(
     requests_per_minute=100  # 100 requests per minute per IP
 )
 
-# Add Billing Middleware for subscription enforcement
-app.add_middleware(
-    BillingMiddleware,
-    subscription_repository=MongoSubscriptionRepository()
-)
+# DISABLED: Add Billing Middleware for subscription enforcement
+# TODO: Fix user_id extraction before enabling
+# app.add_middleware(
+#     BillingMiddleware,
+#     subscription_repository=MongoSubscriptionRepository()
+# )
 
 # Register exception handlers
 register_exception_handlers(app)

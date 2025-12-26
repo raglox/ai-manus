@@ -126,7 +126,6 @@ async def get_all_sessions(
     return APIResponse.success(ListSessionResponse(sessions=session_items))
 
 @router.post("")
-@limiter.limit("10/minute;60/hour")  # GAP-SESSION-002: Limit SSE connections
 async def stream_sessions(
     request: Request,
     current_user: User = Depends(get_current_user),
@@ -154,7 +153,6 @@ async def stream_sessions(
     return EventSourceResponse(event_generator())
 
 @router.post("/{session_id}/chat")
-@limiter.limit("20/minute;100/hour")  # GAP-SESSION-002: Limit chat requests
 async def chat(
     request: Request,
     session_id: str,

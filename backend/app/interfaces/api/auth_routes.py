@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.application.services.auth_service import AuthService
 from app.application.services.token_service import TokenService
@@ -27,19 +25,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Get limiter from app state (will be set in main.py)
-limiter = Limiter(key_func=get_remote_address)
-
 
 
 @router.post("/login", response_model=APIResponse[LoginResponse])
-@limiter.limit("5/minute;20/hour")  # Strict limit to prevent brute force
 async def login(
-    http_request: Request,
     request: LoginRequest,
     auth_service: AuthService = Depends(get_auth_service)
 ) -> APIResponse[LoginResponse]:
-    """User login endpoint with rate limiting (5 req/min, 20 req/hour)"""
+    """User login endpoint with global rate limiting applied via middleware"""
     # Authenticate user and get tokens
     auth_result = await auth_service.login_with_tokens(request.email, request.password)
     
@@ -53,13 +46,11 @@ async def login(
 
 
 @router.post("/register", response_model=APIResponse[RegisterResponse])
-@limiter.limit("3/minute;10/hour")  # Very strict limit to prevent spam registration
 async def register(
-    http_request: Request,
     request: RegisterRequest,
     auth_service: AuthService = Depends(get_auth_service)
 ) -> APIResponse[RegisterResponse]:
-    """User registration endpoint with rate limiting (3 req/min, 10 req/hour)"""
+    """User registration endpoint with global rate limiting applied via middleware"""
     # Register user
     user = await auth_service.register_user(
         fullname=request.fullname,

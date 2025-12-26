@@ -115,9 +115,9 @@ class Subscription(BaseModel):
     def cancel(self, immediate: bool = False):
         """Cancel subscription"""
         if immediate:
-            self.status = SubscriptionStatus.CANCELED
-            self.canceled_at = datetime.now(UTC)
             self.downgrade_to_free()
+            self.status = SubscriptionStatus.CANCELED
+            self.canceled_at = datetime.now(timezone.utc)
         else:
             self.cancel_at_period_end = True
             self.updated_at = datetime.now(timezone.utc)

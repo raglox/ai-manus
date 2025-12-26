@@ -16,6 +16,9 @@ import os
 # Add app to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+# Base URL for API tests
+BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+
 
 # ==================== Pytest Configuration ====================
 

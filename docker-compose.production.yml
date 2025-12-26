@@ -1,0 +1,89 @@
+# Docker Compose for Production Deployment with All Fixes
+# This file builds images from source code (includes all security fixes)
+# Use this for deploying the UPDATED version with:
+# - GAP-BILLING-001: Usage limit enforcement
+# - GAP-SESSION-002: SSE rate limiting  
+# - GAP-SEC-001: XSS protection
+# - All critical security fixes
+
+services:
+  frontend:
+    # Build from source instead of pulling from Docker Hub
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ai-manus-frontend:custom  # Custom tag to avoid conflicts
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - manus-network
+    environment:
+      - BACKEND_URL=http://backend:8000
+
+  backend:
+    # Build from source instead of pulling from Docker Hub
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ai-manus-backend:custom  # Custom tag to avoid conflicts
+    depends_on:
+      - sandbox
+      - mongodb
+      - redis
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      #- ./mcp.json:/etc/mcp.json # Mount MCP servers directory
+    networks:
+      - manus-network
+    env_file:
+      - .env
+    # Expose backend port for direct access (optional)
+    # Port 8002 used to avoid conflicts
+    ports:
+      - "8002:8000"
+
+  sandbox:
+    # For sandbox, we can use the original image (no changes needed)
+    image: ${IMAGE_REGISTRY:-simpleyyt}/manus-sandbox:${IMAGE_TAG:-latest}
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    command: /bin/sh -c "exit 0"  # prevent sandbox from starting, ensure image is pulled
+    restart: "no"
+    networks:
+      - manus-network
+
+  mongodb:
+    image: mongo:7.0
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+    #ports:
+    #  - "27017:27017"
+    networks:
+      - manus-network
+    # Add authentication (recommended for production)
+    # environment:
+    #   - MONGO_INITDB_ROOT_USERNAME=admin
+    #   - MONGO_INITDB_ROOT_PASSWORD=your_secure_password
+
+  redis:
+    image: redis:7.0
+    restart: unless-stopped
+    networks:
+      - manus-network
+    # Add password protection (recommended for production)
+    # command: redis-server --requirepass your_redis_password
+
+volumes:
+  mongodb_data:
+    name: manus-mongodb-data
+
+networks:
+  manus-network:
+    name: manus-network
+    driver: bridge

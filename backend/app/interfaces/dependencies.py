@@ -145,6 +145,11 @@ async def get_current_user(
     """
     settings = get_settings()
     
+    # DEBUG: Log authentication attempt
+    logger.info(f"Authentication attempt - bearer_credentials present: {bearer_credentials is not None}")
+    if bearer_credentials:
+        logger.info(f"Token preview: {bearer_credentials.credentials[:50]}...")
+    
     # If auth_provider is 'none', return anonymous user
     if settings.auth_provider == "none":
         return User(
@@ -157,6 +162,7 @@ async def get_current_user(
     
     # Check if bearer token is provided
     if not bearer_credentials:
+        logger.warning("Authentication failed: No bearer token provided")
         raise UnauthorizedError("Authentication required")
     
     try:
@@ -271,3 +277,7 @@ async def _verify_signature(
         )
     
     return signature
+# Add logging to debug authentication
+import sys
+sys.path.insert(0, '/app')
+
