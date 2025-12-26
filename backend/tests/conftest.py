@@ -32,6 +32,52 @@ def client():
         yield test_client
 
 
+@pytest.fixture
+def test_user_data():
+    """Test user data for authentication"""
+    return {
+        "fullname": "Test User",
+        "password": "password123",
+        "email": "testuser@example.com"
+    }
+
+
+@pytest.fixture
+def authenticated_user(client, test_user_data):
+    """Create and authenticate a test user"""
+    # First register the user
+    register_url = "/api/v1/auth/register"
+    register_response = client.post(register_url, json=test_user_data)
+    
+    if register_response.status_code == 200:
+        auth_data = register_response.json()["data"]
+        return {
+            "user_data": test_user_data,
+            "auth_data": auth_data,
+            "access_token": auth_data["access_token"],
+            "refresh_token": auth_data["refresh_token"]
+        }
+    
+    # If registration fails, try login (user might already exist)
+    login_url = "/api/v1/auth/login"
+    login_response = client.post(login_url, json={
+        "email": test_user_data["email"],
+        "password": test_user_data["password"]
+    })
+    
+    if login_response.status_code == 200:
+        auth_data = login_response.json()["data"]
+        return {
+            "user_data": test_user_data,
+            "auth_data": auth_data,
+            "access_token": auth_data["access_token"],
+            "refresh_token": auth_data["refresh_token"]
+        }
+    
+    # If both fail, raise error
+    raise Exception("Failed to authenticate test user")
+
+
 # ==================== Pytest Configuration ====================
 
 def pytest_configure(config):
