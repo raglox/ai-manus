@@ -27,6 +27,8 @@ from app.infrastructure.repositories.mongo_agent_repository import MongoAgentRep
 from app.infrastructure.repositories.mongo_session_repository import MongoSessionRepository
 from app.infrastructure.repositories.file_mcp_repository import FileMCPRepository
 from app.infrastructure.repositories.user_repository import MongoUserRepository
+from app.infrastructure.repositories.subscription_repository import MongoSubscriptionRepository
+from app.domain.repositories.subscription_repository import SubscriptionRepository
 
 
 # Configure logging
@@ -122,6 +124,13 @@ def get_email_service() -> EmailService:
     logger.info("Creating EmailService instance")
     cache = get_cache()
     return EmailService(cache=cache)
+
+
+@lru_cache()
+def get_subscription_repository() -> SubscriptionRepository:
+    """Get subscription repository instance"""
+    logger.info("Creating SubscriptionRepository instance")
+    return MongoSubscriptionRepository()
 
 
 async def get_current_user(

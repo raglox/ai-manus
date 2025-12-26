@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, Query, Request
 from sse_starlette.sse import EventSourceResponse
 from typing import AsyncGenerator, List, Optional
 from sse_starlette.event import ServerSentEvent
@@ -6,12 +6,16 @@ from datetime import datetime
 import asyncio
 import websockets
 import logging
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from app.interfaces.dependencies import get_file_service
 
 from app.application.services.agent_service import AgentService
 from app.application.services.token_service import TokenService
-from app.application.errors.exceptions import NotFoundError, UnauthorizedError
-from app.interfaces.dependencies import get_agent_service, get_current_user, get_optional_current_user, get_token_service, verify_signature_websocket
+from app.application.errors.exceptions import NotFoundError, UnauthorizedError, BadRequestError
+from app.interfaces.dependencies import get_agent_service, get_current_user, get_optional_current_user, get_token_service, verify_signature_websocket, get_subscription_repository
+from app.domain.repositories.subscription_repository import SubscriptionRepository
+from app.application.utils.sanitizer import sanitize_user_message
 from app.interfaces.schemas.base import APIResponse
 from app.interfaces.schemas.session import (
     ChatRequest, ShellViewRequest, CreateSessionResponse, GetSessionResponse,
@@ -29,11 +33,28 @@ SESSION_POLL_INTERVAL = 5
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
+# Get limiter from app state (will be set in main.py)
+limiter = Limiter(key_func=get_remote_address)
+
 @router.put("", response_model=APIResponse[CreateSessionResponse])
 async def create_session(
     current_user: User = Depends(get_current_user),
-    agent_service: AgentService = Depends(get_agent_service)
+    agent_service: AgentService = Depends(get_agent_service),
+    subscription_repo: SubscriptionRepository = Depends(get_subscription_repository)
 ) -> APIResponse[CreateSessionResponse]:
+    # GAP-BILLING-001: Check usage limits before creating session
+    subscription = await subscription_repo.get_subscription_by_user_id(current_user.id)
+    if subscription:
+        if not subscription.can_use_agent():
+            raise BadRequestError(
+                f"Usage limit reached. Your plan allows {subscription.monthly_agent_runs_limit} runs per month. "
+                f"You have used {subscription.monthly_agent_runs}/{subscription.monthly_agent_runs_limit}. "
+                "Please upgrade your plan to continue."
+            )
+        # Increment usage counter
+        subscription.increment_usage()
+        await subscription_repo.update_subscription(subscription)
+    
     session = await agent_service.create_session(current_user.id)
     return APIResponse.success(
         CreateSessionResponse(
@@ -105,7 +126,9 @@ async def get_all_sessions(
     return APIResponse.success(ListSessionResponse(sessions=session_items))
 
 @router.post("")
+@limiter.limit("10/minute;60/hour")  # GAP-SESSION-002: Limit SSE connections
 async def stream_sessions(
+    request: Request,
     current_user: User = Depends(get_current_user),
     agent_service: AgentService = Depends(get_agent_service)
 ) -> EventSourceResponse:
@@ -131,20 +154,25 @@ async def stream_sessions(
     return EventSourceResponse(event_generator())
 
 @router.post("/{session_id}/chat")
+@limiter.limit("20/minute;100/hour")  # GAP-SESSION-002: Limit chat requests
 async def chat(
+    request: Request,
     session_id: str,
-    request: ChatRequest,
+    chat_request: ChatRequest,
     current_user: User = Depends(get_current_user),
     agent_service: AgentService = Depends(get_agent_service)
 ) -> EventSourceResponse:
+    # GAP-SEC-001: Sanitize user message to prevent XSS
+    sanitized_message = sanitize_user_message(chat_request.message) if chat_request.message else None
+    
     async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
         async for event in agent_service.chat(
             session_id=session_id,
             user_id=current_user.id,
-            message=request.message,
-            timestamp=datetime.fromtimestamp(request.timestamp) if request.timestamp else None,
-            event_id=request.event_id,
-            attachments=request.attachments
+            message=sanitized_message,
+            timestamp=datetime.fromtimestamp(chat_request.timestamp) if chat_request.timestamp else None,
+            event_id=chat_request.event_id,
+            attachments=chat_request.attachments
         ):
             logger.debug(f"Received event from chat: {event}")
             sse_event = await EventMapper.event_to_sse_event(event)
