@@ -13,6 +13,7 @@ from app.infrastructure.logging import setup_logging
 from app.interfaces.errors.exception_handlers import register_exception_handlers
 from app.infrastructure.models.documents import AgentDocument, SessionDocument, UserDocument, SubscriptionDocument
 from app.infrastructure.middleware import BillingMiddleware
+from app.infrastructure.middleware.rate_limit import SimpleRateLimiter
 from app.infrastructure.repositories.subscription_repository import MongoSubscriptionRepository
 from beanie import init_beanie
 
@@ -72,6 +73,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Add Rate Limiting Middleware (for webhook protection)
+app.add_middleware(
+    SimpleRateLimiter,
+    requests_per_minute=100  # 100 requests per minute per IP
 )
 
 # Add Billing Middleware for subscription enforcement

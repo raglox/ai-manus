@@ -81,6 +81,11 @@
             <div v-if="subscription.cancel_at_period_end" class="cancel-info">
               ⚠️ Your subscription will be canceled at the end of the billing period
             </div>
+
+            <!-- Past Due Warning -->
+            <div v-if="subscription.status === 'PAST_DUE'" class="past-due-warning">
+              ⚠️ Payment Failed - Please update your payment method to continue service
+            </div>
           </div>
 
           <div class="plan-actions">
@@ -463,6 +468,18 @@ async function handleStartTrial() {
   color: #991b1b;
   border-radius: 8px;
   margin-top: 1rem;
+}
+
+.past-due-warning {
+  padding: 0.75rem 1rem;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .plan-actions {

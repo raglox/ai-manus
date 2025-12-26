@@ -4,7 +4,7 @@ import stripe
 import os
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from app.domain.models.subscription import Subscription, SubscriptionPlan, SubscriptionStatus
 from app.domain.repositories.subscription_repository import SubscriptionRepository
@@ -263,8 +263,8 @@ class StripeService:
         # Update subscription details
         subscription.status = SubscriptionStatus.ACTIVE
         subscription.stripe_price_id = stripe_subscription['items']['data'][0]['price']['id']
-        subscription.current_period_start = datetime.fromtimestamp(stripe_subscription['current_period_start'], UTC)
-        subscription.current_period_end = datetime.fromtimestamp(stripe_subscription['current_period_end'], UTC)
+        subscription.current_period_start = datetime.fromtimestamp(stripe_subscription['current_period_start'], timezone.utc)
+        subscription.current_period_end = datetime.fromtimestamp(stripe_subscription['current_period_end'], timezone.utc)
         
         # Determine plan based on price ID
         if subscription.stripe_price_id == self.price_id_basic:
@@ -292,8 +292,8 @@ class StripeService:
         
         # Update subscription details
         subscription.status = SubscriptionStatus(stripe_subscription['status'])
-        subscription.current_period_start = datetime.fromtimestamp(stripe_subscription['current_period_start'], UTC)
-        subscription.current_period_end = datetime.fromtimestamp(stripe_subscription['current_period_end'], UTC)
+        subscription.current_period_start = datetime.fromtimestamp(stripe_subscription['current_period_start'], timezone.utc)
+        subscription.current_period_end = datetime.fromtimestamp(stripe_subscription['current_period_end'], timezone.utc)
         subscription.cancel_at_period_end = stripe_subscription['cancel_at_period_end']
         
         # Save

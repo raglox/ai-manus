@@ -1,7 +1,7 @@
 """Subscription domain model"""
 
 from typing import Optional
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pydantic import BaseModel, field_validator
 from enum import Enum
 
@@ -52,8 +52,8 @@ class Subscription(BaseModel):
     is_trial: bool = False
     
     # Timestamps
-    created_at: datetime = datetime.now(UTC)
-    updated_at: datetime = datetime.now(UTC)
+    created_at: datetime = datetime.now(timezone.utc)
+    updated_at: datetime = datetime.now(timezone.utc)
     
     @field_validator('user_id')
     @classmethod
@@ -73,7 +73,7 @@ class Subscription(BaseModel):
             return False
         
         # Check if trial has expired
-        if self.is_trial and self.trial_end and datetime.now(UTC) > self.trial_end:
+        if self.is_trial and self.trial_end and datetime.now(timezone.utc) > self.trial_end:
             return False
         
         return True
@@ -81,26 +81,26 @@ class Subscription(BaseModel):
     def increment_usage(self):
         """Increment monthly agent runs"""
         self.monthly_agent_runs += 1
-        self.updated_at = datetime.now(UTC)
+        self.updated_at = datetime.now(timezone.utc)
     
     def reset_monthly_usage(self):
         """Reset monthly usage counter (called on billing cycle)"""
         self.monthly_agent_runs = 0
-        self.updated_at = datetime.now(UTC)
+        self.updated_at = datetime.now(timezone.utc)
     
     def upgrade_to_basic(self):
         """Upgrade to Basic plan"""
         self.plan = SubscriptionPlan.BASIC
         self.monthly_agent_runs_limit = 1000  # 1,000 runs/month
         self.monthly_agent_runs = 0  # Reset usage on upgrade
-        self.updated_at = datetime.now(UTC)
+        self.updated_at = datetime.now(timezone.utc)
     
     def upgrade_to_pro(self):
         """Upgrade to Pro plan"""
         self.plan = SubscriptionPlan.PRO
         self.monthly_agent_runs_limit = 5000  # 5,000 runs/month
         self.monthly_agent_runs = 0  # Reset usage on upgrade
-        self.updated_at = datetime.now(UTC)
+        self.updated_at = datetime.now(timezone.utc)
     
     def downgrade_to_free(self):
         """Downgrade to Free plan"""
@@ -110,7 +110,7 @@ class Subscription(BaseModel):
         self.stripe_subscription_id = None
         self.stripe_price_id = None
         self.cancel_at_period_end = False
-        self.updated_at = datetime.now(UTC)
+        self.updated_at = datetime.now(timezone.utc)
     
     def cancel(self, immediate: bool = False):
         """Cancel subscription"""
@@ -120,12 +120,12 @@ class Subscription(BaseModel):
             self.downgrade_to_free()
         else:
             self.cancel_at_period_end = True
-            self.updated_at = datetime.now(UTC)
+            self.updated_at = datetime.now(timezone.utc)
     
     def activate_trial(self, days: int = 14):
         """Activate trial period"""
         from datetime import timedelta
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         self.is_trial = True
         self.trial_start = now
         self.trial_end = now + timedelta(days=days)
