@@ -6,7 +6,11 @@ They test file upload/download functionality with real sandbox containers.
 
 Requirements:
 - Docker daemon running
-- raglox-sandbox containers available
+- Sandbox containers with HTTP API on port 8080
+- Containers must support file upload/download APIs
+
+Note: These tests are marked as integration tests and can be skipped in CI/CD
+if sandbox containers are not available. Run with: pytest -m integration
 """
 
 import pytest
@@ -25,31 +29,41 @@ try:
 except Exception:
     DOCKER_AVAILABLE = False
 
-# Skip all tests if Docker is not available
-pytestmark = pytest.mark.skipif(not DOCKER_AVAILABLE, reason="Docker not available")
+# Mark all tests as integration tests
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(not DOCKER_AVAILABLE, reason="Docker not available")
+]
 
 
 @pytest.fixture
 def get_available_sandbox():
     """Get an available sandbox container from running containers"""
     client = docker.from_env()
-    containers = client.containers.list(filters={"name": "raglox"})
     
-    if not containers:
-        pytest.skip("No raglox sandbox containers available")
+    # Try to find containers that might be sandbox containers with HTTP API
+    sandbox_patterns = ["raglox-sandbox", "strix-sandbox", "openhands", "sandbox"]
     
-    # Get first available container
-    container = containers[0]
-    container_name = container.name
+    containers = client.containers.list()
     
-    # Get container IP
-    networks = container.attrs['NetworkSettings']['Networks']
-    ip = list(networks.values())[0]['IPAddress']
+    for container in containers:
+        # Check if container name or image matches sandbox patterns
+        image_name = container.image.tags[0] if container.image.tags else str(container.image.id)
+        if any(pattern in image_name.lower() or pattern in container.name.lower() for pattern in sandbox_patterns):
+            # Get container IP
+            networks = container.attrs['NetworkSettings']['Networks']
+            if not networks:
+                continue
+                
+            ip = list(networks.values())[0]['IPAddress']
+            if not ip:
+                continue
+            
+            # Return first matching container
+            return {"ip": ip, "container_name": container.name, "container": container}
     
-    if not ip:
-        pytest.skip(f"Container {container_name} has no IP address")
-    
-    return {"ip": ip, "container_name": container_name, "container": container}
+    pytest.skip("No suitable sandbox containers with HTTP API found. "
+                "Please ensure sandbox containers are running with HTTP API on port 8080.")
 
 
 @pytest.fixture
