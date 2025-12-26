@@ -116,16 +116,24 @@ class BillingMiddleware(BaseHTTPMiddleware):
     def _get_limit_message(self, subscription) -> str:
         """Get appropriate error message based on subscription status"""
         from app.domain.models.subscription import SubscriptionStatus
+        from datetime import datetime, UTC
         
+        # Check for inactive subscription first
         if subscription.status in [SubscriptionStatus.CANCELED, SubscriptionStatus.UNPAID]:
             return "Your subscription is inactive. Please renew to continue using the agent."
         
+        # Check for trial-related issues
+        if subscription.is_trial:
+            if not subscription.trial_end:
+                # Trial is marked as active but no end date - data inconsistency
+                logger.error(f"Trial subscription without trial_end for user: {subscription.user_id}")
+                return "Your trial is invalid. Please contact support or subscribe to continue."
+            elif datetime.now(UTC) > subscription.trial_end:
+                return "Your trial period has expired. Please subscribe to continue using the agent."
+        
+        # Check for usage limit
         if subscription.monthly_agent_runs >= subscription.monthly_agent_runs_limit:
             return f"You have reached your monthly limit of {subscription.monthly_agent_runs_limit} agent runs. Please upgrade your plan to continue."
         
-        if subscription.is_trial and subscription.trial_end:
-            from datetime import datetime, UTC
-            if datetime.now(UTC) > subscription.trial_end:
-                return "Your trial period has expired. Please subscribe to continue using the agent."
-        
+        # Generic fallback
         return "Your subscription does not allow agent usage. Please check your subscription status."

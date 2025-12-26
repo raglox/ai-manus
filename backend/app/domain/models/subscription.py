@@ -91,13 +91,15 @@ class Subscription(BaseModel):
     def upgrade_to_basic(self):
         """Upgrade to Basic plan"""
         self.plan = SubscriptionPlan.BASIC
-        self.monthly_agent_runs_limit = 100  # 100 runs/month
+        self.monthly_agent_runs_limit = 1000  # 1,000 runs/month
+        self.monthly_agent_runs = 0  # Reset usage on upgrade
         self.updated_at = datetime.now(UTC)
     
     def upgrade_to_pro(self):
         """Upgrade to Pro plan"""
         self.plan = SubscriptionPlan.PRO
-        self.monthly_agent_runs_limit = 1000  # 1000 runs/month
+        self.monthly_agent_runs_limit = 5000  # 5,000 runs/month
+        self.monthly_agent_runs = 0  # Reset usage on upgrade
         self.updated_at = datetime.now(UTC)
     
     def downgrade_to_free(self):
