@@ -11,7 +11,9 @@ from app.interfaces.dependencies import get_agent_service
 from app.interfaces.api.routes import router
 from app.infrastructure.logging import setup_logging
 from app.interfaces.errors.exception_handlers import register_exception_handlers
-from app.infrastructure.models.documents import AgentDocument, SessionDocument, UserDocument
+from app.infrastructure.models.documents import AgentDocument, SessionDocument, UserDocument, SubscriptionDocument
+from app.infrastructure.middleware import BillingMiddleware
+from app.infrastructure.repositories.subscription_repository import MongoSubscriptionRepository
 from beanie import init_beanie
 
 # Initialize logging system
@@ -34,7 +36,7 @@ async def lifespan(app: FastAPI):
     # Initialize Beanie
     await init_beanie(
         database=get_mongodb().client[settings.mongodb_database],
-        document_models=[AgentDocument, SessionDocument, UserDocument]
+        document_models=[AgentDocument, SessionDocument, UserDocument, SubscriptionDocument]
     )
     logger.info("Successfully initialized Beanie")
     
@@ -70,6 +72,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Add Billing Middleware for subscription enforcement
+app.add_middleware(
+    BillingMiddleware,
+    subscription_repository=MongoSubscriptionRepository()
 )
 
 # Register exception handlers

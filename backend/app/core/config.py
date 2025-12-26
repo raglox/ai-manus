@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # MCP configuration
     mcp_config_path: str = "/etc/mcp.json"
     
+    # Stripe billing configuration
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_price_id_basic: str | None = None
+    stripe_price_id_pro: str | None = None
+    
     # Logging configuration
     log_level: str = "INFO"
     
