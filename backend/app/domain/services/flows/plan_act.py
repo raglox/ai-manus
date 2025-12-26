@@ -25,6 +25,7 @@ from app.domain.utils.json_parser import JsonParser
 from app.domain.repositories.session_repository import SessionRepository
 from app.domain.models.session import SessionStatus
 from app.domain.services.tools.mcp import MCPTool
+from app.domain.services.tools.mcp_sandbox import MCPSandboxTool
 from app.domain.services.tools.shell import ShellTool
 from app.domain.services.tools.browser import BrowserTool
 from app.domain.services.tools.file import FileTool
@@ -56,6 +57,7 @@ class PlanActFlow(BaseFlow):
         json_parser: JsonParser,
         mcp_tool: MCPTool,
         search_engine: Optional[SearchEngine] = None,
+        use_mcp_sandbox: bool = False,  # New parameter
     ):
         self._agent_id = agent_id
         self._repository = agent_repository
@@ -63,6 +65,7 @@ class PlanActFlow(BaseFlow):
         self._session_repository = session_repository
         self.status = AgentStatus.IDLE
         self.plan = None
+        self._mcp_sandbox_tool = None  # Will be initialized if needed
 
         tools = [
             ShellTool(sandbox),
@@ -70,8 +73,22 @@ class PlanActFlow(BaseFlow):
             FileTool(sandbox),
             MessageTool(),
             WebDevTool(sandbox),
-            mcp_tool
         ]
+        
+        # Choose MCP implementation
+        if use_mcp_sandbox:
+            # Use MCPSandboxTool (runs in Docker sandbox)
+            logger.info("Using MCPSandboxTool (Docker sandbox mode)")
+            self._mcp_sandbox_tool = MCPSandboxTool(
+                sandbox=sandbox,
+                session_id=session_id,
+                config_path="mcp_config.json"
+            )
+            tools.append(self._mcp_sandbox_tool)
+        else:
+            # Use original MCPTool (runs on host)
+            logger.info("Using MCPTool (host mode)")
+            tools.append(mcp_tool)
         
         # Only add search tool when search_engine is not None
         if search_engine:
@@ -97,6 +114,19 @@ class PlanActFlow(BaseFlow):
         logger.debug(f"Created execution agent for Agent {self._agent_id}")
 
     async def run(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
+
+        # Initialize MCP Sandbox Tool if enabled
+        if self._mcp_sandbox_tool:
+            logger.info("Initializing MCPSandboxTool...")
+            try:
+                success = await self._mcp_sandbox_tool.initialize()
+                if success:
+                    logger.info(f"MCPSandboxTool initialized with {len(self._mcp_sandbox_tool.get_tools())} tools")
+                else:
+                    logger.warning("MCPSandboxTool initialization failed, continuing without MCP tools")
+            except Exception as e:
+                logger.error(f"Failed to initialize MCPSandboxTool: {e}", exc_info=True)
+                logger.warning("Continuing without MCP tools")
 
         # TODO: move to task runner
         session = await self._session_repository.find_by_id(self._session_id)
@@ -216,6 +246,15 @@ class PlanActFlow(BaseFlow):
                 break
                 
         yield DoneEvent()
+        
+        # Cleanup MCP Sandbox Tool if it was used
+        if self._mcp_sandbox_tool:
+            logger.info("Cleaning up MCPSandboxTool...")
+            try:
+                await self._mcp_sandbox_tool.cleanup()
+                logger.info("MCPSandboxTool cleanup completed")
+            except Exception as e:
+                logger.error(f"Error during MCPSandboxTool cleanup: {e}", exc_info=True)
         
         logger.info(f"Agent {self._agent_id} message processing completed")
     
