@@ -20,6 +20,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
+# ==================== FastAPI TestClient ====================
+
+@pytest.fixture
+def client():
+    """Create FastAPI TestClient for API integration tests"""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    
+    with TestClient(app) as test_client:
+        yield test_client
+
+
 # ==================== Pytest Configuration ====================
 
 def pytest_configure(config):
