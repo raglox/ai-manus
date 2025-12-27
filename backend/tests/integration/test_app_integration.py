@@ -27,7 +27,7 @@ class TestDatabaseIntegration:
         settings = get_settings()
         
         # Create client
-        client = AsyncIOMotorClient(settings.mongo_uri)
+        client = AsyncIOMotorClient(settings.mongodb_uri)
         
         # Test connection
         try:
@@ -46,7 +46,7 @@ class TestDatabaseIntegration:
     @pytest.mark.asyncio
     async def test_user_repository_integration(self):
         """Test User repository with real database"""
-        from app.infrastructure.persistence.user_repository import UserRepository
+        from app.infrastructure.repositories.user_repository import MongoUserRepository as UserRepository
         from app.domain.models.user import User, UserRole
         from datetime import datetime, UTC
         import uuid
@@ -106,9 +106,14 @@ class TestRedisIntegration:
         
         settings = get_settings()
         
+        # Build Redis URL
+        redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+        if settings.redis_password:
+            redis_url = f"redis://:{settings.redis_password}@{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+        
         # Create client
         redis_client = await aioredis.from_url(
-            settings.redis_url,
+            redis_url,
             encoding="utf-8",
             decode_responses=True
         )
@@ -142,7 +147,7 @@ class TestAuthServiceIntegration:
     async def auth_service(self):
         """Create AuthService with real repositories"""
         from app.application.services.auth_service import AuthService
-        from app.infrastructure.persistence.user_repository import UserRepository
+        from app.infrastructure.repositories.user_repository import MongoUserRepository as UserRepository
         from app.application.services.token_service import TokenService
         
         user_repo = UserRepository()
@@ -190,7 +195,7 @@ class TestAuthServiceIntegration:
             
         finally:
             # Cleanup
-            from app.infrastructure.persistence.user_repository import UserRepository
+            from app.infrastructure.repositories.user_repository import MongoUserRepository as UserRepository
             repo = UserRepository()
             try:
                 # Find user and delete
@@ -207,51 +212,57 @@ class TestSessionServiceIntegration:
     
     @pytest.fixture
     async def session_service(self):
-        """Create SessionService with real repositories"""
-        from app.application.services.session_service import SessionService
-        from app.infrastructure.persistence.session_repository import SessionRepository
+        """Create Session Repository (no SessionService exists)"""
+        from app.infrastructure.repositories.mongo_session_repository import MongoSessionRepository
         
-        return SessionService(SessionRepository())
+        return MongoSessionRepository()
     
     @pytest.mark.asyncio
     async def test_create_and_retrieve_session(self, session_service):
         """Test session creation and retrieval"""
+        from app.domain.models.session import Session, SessionStatus
+        from datetime import datetime, UTC
         import uuid
         
         test_user_id = f"test_user_{uuid.uuid4().hex[:8]}"
+        session_id = f"test_session_{uuid.uuid4().hex[:8]}"
+        
+        # Create session object
+        session = Session(
+            id=session_id,
+            user_id=test_user_id,
+            agent_type="integration_test",
+            status=SessionStatus.PENDING,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC)
+        )
         
         try:
-            # Create session
-            session = await session_service.create_session(
-                user_id=test_user_id,
-                agent_type="integration_test"
-            )
-            
-            assert session is not None
-            assert session.user_id == test_user_id
-            print(f"✅ Session created: {session.id}")
+            # Create session using repository
+            created = await session_service.create(session)
+            assert created is not None
+            assert created.user_id == test_user_id
+            print(f"✅ Session created: {created.id}")
             
             # Retrieve session
-            retrieved = await session_service.get_session(session.id)
+            retrieved = await session_service.find_by_id(session_id)
             assert retrieved is not None
-            assert retrieved.id == session.id
+            assert retrieved.id == session_id
             assert retrieved.user_id == test_user_id
             print(f"✅ Session retrieved: {retrieved.id}")
             
-            # Update session
-            await session_service.update_session_metadata(
-                session_id=session.id,
-                metadata={"test_key": "test_value"}
-            )
-            
-            updated = await session_service.get_session(session.id)
+            # Update session (modify and save)
+            if hasattr(retrieved, 'metadata') and retrieved.metadata is None:
+                retrieved.metadata = {}
+            retrieved.metadata = {"test_key": "test_value"}
+            updated = await session_service.update(retrieved)
             assert updated.metadata.get("test_key") == "test_value"
             print(f"✅ Session updated")
             
         finally:
             # Cleanup
             try:
-                await session_service.delete_session(session.id)
+                await session_service.delete(session_id)
                 print(f"✅ Session cleaned up")
             except Exception as e:
                 print(f"⚠️  Cleanup warning: {e}")
@@ -263,12 +274,16 @@ class TestFileServiceIntegration:
     @pytest.mark.asyncio
     async def test_file_upload_download_cycle(self):
         """Test file upload and download"""
-        from app.infrastructure.external.file.gridfsfile import GridFSFile
+        from app.infrastructure.external.file.gridfsfile import GridFSFileStorage
+        from app.infrastructure.storage.mongodb import get_mongodb
         from io import BytesIO
         import uuid
         
+        # Get MongoDB instance
+        mongodb = await get_mongodb()
+        
         # Create file service
-        file_service = GridFSFile()
+        file_service = GridFSFileStorage(mongodb)
         
         # Test data
         test_content = b"Integration test file content"
@@ -351,14 +366,14 @@ class TestConfigurationIntegration:
         settings = get_settings()
         
         # Verify critical settings
-        assert settings.mongo_uri is not None
-        assert settings.redis_url is not None
+        assert settings.mongodb_uri is not None
+        assert settings.redis_host is not None
         assert settings.jwt_secret_key is not None
         assert settings.auth_provider is not None
         
         print("✅ All critical settings loaded")
         print(f"   - Auth provider: {settings.auth_provider}")
-        print(f"   - Environment: {settings.environment}")
+        print(f"   - MongoDB: {settings.mongodb_uri}")
     
     def test_logging_configuration(self):
         """Test that logging is configured"""
@@ -381,7 +396,7 @@ class TestErrorHandlingIntegration:
     async def test_auth_service_handles_duplicate_email(self):
         """Test that duplicate email registration fails gracefully"""
         from app.application.services.auth_service import AuthService
-        from app.infrastructure.persistence.user_repository import UserRepository
+        from app.infrastructure.repositories.user_repository import MongoUserRepository as UserRepository
         from app.application.services.token_service import TokenService
         from app.application.errors.exceptions import BadRequestError
         import uuid
@@ -440,7 +455,7 @@ class TestSystemIntegration:
         
         # Test MongoDB
         try:
-            mongo_client = AsyncIOMotorClient(settings.mongo_uri)
+            mongo_client = AsyncIOMotorClient(settings.mongodb_uri)
             await mongo_client.admin.command('ping')
             health_status['mongodb'] = 'healthy'
             mongo_client.close()
@@ -449,7 +464,10 @@ class TestSystemIntegration:
         
         # Test Redis
         try:
-            redis_client = await aioredis.from_url(settings.redis_url)
+            redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+            if settings.redis_password:
+                redis_url = f"redis://:{settings.redis_password}@{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+            redis_client = await aioredis.from_url(redis_url)
             await redis_client.ping()
             health_status['redis'] = 'healthy'
             await redis_client.close()
