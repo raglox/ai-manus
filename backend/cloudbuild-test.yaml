@@ -1,0 +1,5 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'Dockerfile.test', '-t', 'us-central1-docker.pkg.dev/gen-lang-client-0415541083/manus-app/backend-test:latest', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/gen-lang-client-0415541083/manus-app/backend-test:latest']

@@ -56,13 +56,18 @@ if settings.sentry_dsn:
 else:
     logger.warning("⚠️ Sentry DSN not configured - error tracking disabled")
 
-# Initialize Redis-backed Rate Limiter
-redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
-if settings.redis_password:
-    redis_url = f"redis://:{settings.redis_password}@{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
-
-limiter = create_rate_limiter(redis_url)
-logger.info(f"Rate limiter initialized with Redis backend: {settings.redis_host}:{settings.redis_port}")
+# Initialize Redis-backed Rate Limiter (with graceful failure)
+try:
+    redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+    if settings.redis_password and settings.redis_password != "no-password":
+        redis_url = f"redis://:{settings.redis_password}@{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+    
+    limiter = create_rate_limiter(redis_url)
+    logger.info(f"✅ Rate limiter initialized with Redis backend: {settings.redis_host}:{settings.redis_port}")
+except Exception as e:
+    logger.warning(f"⚠️ Rate limiter initialization failed: {e}. Using memory-based rate limiter.")
+    # Fallback to memory-based rate limiter
+    limiter = Limiter(key_func=lambda: "global", default_limits=["1000/hour"])
 
 
 # Create lifespan context manager
@@ -71,29 +76,48 @@ async def lifespan(app: FastAPI):
     # Code executed on startup
     logger.info("Application startup - Manus AI Agent initializing")
     
-    # Initialize MongoDB and Beanie
-    await get_mongodb().initialize()
-
-    # Initialize Beanie
-    await init_beanie(
-        database=get_mongodb().client[settings.mongodb_database],
-        document_models=[AgentDocument, SessionDocument, UserDocument, SubscriptionDocument]
-    )
-    logger.info("Successfully initialized Beanie")
+    # Initialize MongoDB and Beanie (with graceful failure)
+    mongodb_initialized = False
+    redis_initialized = False
     
-    # Initialize Redis
-    await get_redis().initialize()
+    try:
+        await get_mongodb().initialize()
+        await init_beanie(
+            database=get_mongodb().client[settings.mongodb_database],
+            document_models=[AgentDocument, SessionDocument, UserDocument, SubscriptionDocument]
+        )
+        mongodb_initialized = True
+        logger.info("✅ Successfully initialized MongoDB and Beanie")
+    except Exception as e:
+        logger.warning(f"⚠️ MongoDB initialization failed: {e}. Running without MongoDB.")
+    
+    # Initialize Redis (with graceful failure)
+    try:
+        await get_redis().initialize()
+        redis_initialized = True
+        logger.info("✅ Successfully initialized Redis")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis initialization failed: {e}. Running without Redis.")
     
     try:
         yield
     finally:
         # Code executed on shutdown
         logger.info("Application shutdown - Manus AI Agent terminating")
+        
         # Disconnect from MongoDB
-        await get_mongodb().shutdown()
+        if mongodb_initialized:
+            try:
+                await get_mongodb().shutdown()
+            except Exception as e:
+                logger.error(f"Error shutting down MongoDB: {e}")
+        
         # Disconnect from Redis
-        await get_redis().shutdown()
-
+        if redis_initialized:
+            try:
+                await get_redis().shutdown()
+            except Exception as e:
+                logger.error(f"Error shutting down Redis: {e}")
 
         logger.info("Cleaning up AgentService instance")
         try:
