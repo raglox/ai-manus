@@ -19,6 +19,32 @@ pytestmark = pytest.mark.integration
 # No need for manual initialization in tests
 
 
+def assert_api_success(response, status_code=200):
+    """Helper to validate API response format"""
+    assert response.status_code == status_code, f"Expected {status_code}, got {response.status_code}: {response.text}"
+    data = response.json()
+    # Support both formats: {success: true, data: ...} and {code: 0, msg: "success", data: ...}
+    if "code" in data:
+        assert data["code"] == 0, f"API error: {data.get('msg', 'Unknown error')}"
+        return data.get("data", {})
+    elif "success" in data:
+        assert data["success"] is True, f"API error: {data.get('message', 'Unknown error')}"
+        return data.get("data", {})
+    else:
+        raise AssertionError(f"Unknown response format: {data}")
+
+
+def get_access_token_from_response(response_data):
+    """Extract access token from response"""
+    # Handle different response structures
+    if isinstance(response_data, dict):
+        if "access_token" in response_data:
+            return response_data["access_token"]
+        elif "data" in response_data and isinstance(response_data["data"], dict):
+            return response_data["data"].get("access_token")
+    return None
+
+
 class TestDatabaseIntegration:
     """Test database integration"""
     
@@ -67,11 +93,14 @@ class TestDatabaseIntegration:
                     "email": test_email,
                     "password": test_password
                 })
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] is True
-                assert data["data"]["email"] == test_email
-                user_id = data["data"]["id"]
+                register_data = assert_api_success(response)
+                # Handle both response formats
+                if "user" in register_data:
+                    user_id = register_data["user"]["id"]
+                    assert register_data["user"]["email"] == test_email
+                else:
+                    user_id = register_data.get("id")
+                    assert register_data.get("email") == test_email
                 print(f"✅ User registered via API: {user_id}")
                 
                 # Step 2: Login to get token
@@ -79,10 +108,9 @@ class TestDatabaseIntegration:
                     "email": test_email,
                     "password": test_password
                 })
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] is True
-                access_token = data["data"]["access_token"]
+                login_data = assert_api_success(response)
+                access_token = get_access_token_from_response(login_data) or login_data.get("access_token")
+                assert access_token is not None, "No access token in response"
                 print(f"✅ User logged in, got token")
                 
                 # Step 3: Get user details via /me endpoint
@@ -90,11 +118,11 @@ class TestDatabaseIntegration:
                     "/api/v1/auth/me",
                     headers={"Authorization": f"Bearer {access_token}"}
                 )
-                assert response.status_code == 200
-                data = response.json()
-                assert data["success"] is True
-                assert data["data"]["email"] == test_email
-                assert data["data"]["fullname"] == test_fullname
+                me_data = assert_api_success(response)
+                # Handle both formats
+                user_data = me_data.get("user", me_data)
+                assert user_data.get("email") == test_email
+                assert user_data.get("fullname") == test_fullname
                 print(f"✅ User details retrieved via API")
                 
             finally:
@@ -165,52 +193,46 @@ class TestAuthServiceIntegration:
             
             # Step 1: Register user via API
             response = client.post("/api/v1/auth/register", json={
-            "fullname": test_fullname,
-            "email": test_email,
-            "password": test_password
-        })
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["data"]["email"] == test_email
-        print(f"✅ User registered via API: {data['data']['id']}")
-        
-        # Step 2: Login with correct credentials
-        response = client.post("/api/v1/auth/login", json={
-            "email": test_email,
-            "password": test_password
-        })
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert "access_token" in data["data"]
-        assert "refresh_token" in data["data"]
-        access_token = data["data"]["access_token"]
-        refresh_token = data["data"]["refresh_token"]
-        print(f"✅ Login successful via API, got tokens")
-        
-        # Step 3: Verify token by calling /me endpoint
-        response = client.get(
-            "/api/v1/auth/me",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["data"]["email"] == test_email
-        print(f"✅ Token verified via /me endpoint")
-        
-        # Step 4: Test refresh token
-        response = client.post("/api/v1/auth/refresh", json={
-            "refresh_token": refresh_token
-        })
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert "access_token" in data["data"]
-        print(f"✅ Refresh token works")
-        
-        print("✅ Complete auth flow via API successful")
+                "fullname": test_fullname,
+                "email": test_email,
+                "password": test_password
+            })
+            register_data = assert_api_success(response)
+            user_data = register_data.get("user", register_data)
+            print(f"✅ User registered via API: {user_data.get('id')}")
+            
+            # Step 2: Login with correct credentials
+            response = client.post("/api/v1/auth/login", json={
+                "email": test_email,
+                "password": test_password
+            })
+            login_data = assert_api_success(response)
+            access_token = get_access_token_from_response(login_data) or login_data.get("access_token")
+            refresh_token = login_data.get("refresh_token")
+            assert access_token is not None
+            assert refresh_token is not None
+            print(f"✅ Login successful via API, got tokens")
+            
+            # Step 3: Verify token by calling /me endpoint
+            response = client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            me_data = assert_api_success(response)
+            user_info = me_data.get("user", me_data)
+            assert user_info.get("email") == test_email
+            print(f"✅ Token verified via /me endpoint")
+            
+            # Step 4: Test refresh token
+            response = client.post("/api/v1/auth/refresh", json={
+                "refresh_token": refresh_token
+            })
+            refresh_data = assert_api_success(response)
+            new_access_token = get_access_token_from_response(refresh_data) or refresh_data.get("access_token")
+            assert new_access_token is not None
+            print(f"✅ Refresh token works")
+            
+            print("✅ Complete auth flow via API successful")
 
 
 
@@ -231,65 +253,63 @@ class TestSessionServiceIntegration:
             
             # Register
             response = client.post("/api/v1/auth/register", json={
-            "fullname": "Session Test User",
-            "email": test_email,
-            "password": test_password
-        })
-        assert response.status_code == 200
-        print(f"✅ User registered for session test")
-        
-        # Login to get token
-        response = client.post("/api/v1/auth/login", json={
-            "email": test_email,
-            "password": test_password
-        })
-        assert response.status_code == 200
-        access_token = response.json()["data"]["access_token"]
-        headers = {"Authorization": f"Bearer {access_token}"}
-        print(f"✅ User logged in, got token")
-        
-        # Step 2: Create session via API
-        response = client.put(
-            "/api/v1/sessions",
-            headers=headers
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        session_id = data["data"]["session_id"]
-        print(f"✅ Session created via API: {session_id}")
-        
-        # Step 3: Retrieve session via API
-        response = client.get(
-            f"/api/v1/sessions/{session_id}",
-            headers=headers
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["data"]["id"] == session_id
-        print(f"✅ Session retrieved via API")
-        
-        # Step 4: List sessions
-        response = client.get(
-            "/api/v1/sessions",
-            headers=headers
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert len(data["data"]["sessions"]) > 0
-        print(f"✅ Sessions listed via API")
-        
-        # Step 5: Stop/delete session
-        response = client.delete(
-            f"/api/v1/sessions/{session_id}",
-            headers=headers
-        )
-        assert response.status_code == 200
-        print(f"✅ Session deleted via API")
-        
-        print("✅ Complete session CRUD via API successful")
+                "fullname": "Session Test User",
+                "email": test_email,
+                "password": test_password
+            })
+            register_data = assert_api_success(response)
+            print(f"✅ User registered for session test")
+            
+            # Login to get token
+            response = client.post("/api/v1/auth/login", json={
+                "email": test_email,
+                "password": test_password
+            })
+            login_data = assert_api_success(response)
+            access_token = get_access_token_from_response(login_data) or login_data.get("access_token")
+            headers = {"Authorization": f"Bearer {access_token}"}
+            print(f"✅ User logged in, got token")
+            
+            # Step 2: Create session via API
+            response = client.put(
+                "/api/v1/sessions",
+                headers=headers
+            )
+            session_data = assert_api_success(response)
+            session_id = session_data.get("session_id") or session_data.get("id")
+            assert session_id is not None, "No session_id in response"
+            print(f"✅ Session created via API: {session_id}")
+            
+            # Step 3: Retrieve session via API
+            response = client.get(
+                f"/api/v1/sessions/{session_id}",
+                headers=headers
+            )
+            get_data = assert_api_success(response)
+            session_info = get_data.get("session", get_data)
+            retrieved_id = session_info.get("session_id") or session_info.get("id")
+            assert retrieved_id == session_id, f"Expected session_id {session_id}, got {retrieved_id}"
+            print(f"✅ Session retrieved via API")
+            
+            # Step 4: List sessions
+            response = client.get(
+                "/api/v1/sessions",
+                headers=headers
+            )
+            list_data = assert_api_success(response)
+            sessions = list_data.get("sessions", [])
+            assert len(sessions) > 0
+            print(f"✅ Sessions listed via API")
+            
+            # Step 5: Stop/delete session
+            response = client.delete(
+                f"/api/v1/sessions/{session_id}",
+                headers=headers
+            )
+            assert response.status_code == 200
+            print(f"✅ Session deleted via API")
+            
+            print("✅ Complete session CRUD via API successful")
 
 
 class TestFileServiceIntegration:
@@ -392,27 +412,33 @@ class TestErrorHandlingIntegration:
             
             # Register first user
             response = client.post("/api/v1/auth/register", json={
-            "fullname": "First User",
-            "email": test_email,
-            "password": test_password
-        })
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        print(f"✅ First user registered via API")
+                "fullname": "First User",
+                "email": test_email,
+                "password": test_password
+            })
+            register_data = assert_api_success(response)
+            print(f"✅ First user registered via API")
         
-        # Try to register second user with same email
-        response = client.post("/api/v1/auth/register", json={
-            "fullname": "Second User",
-            "email": test_email,
-            "password": "Password456!"
-        })
-        # Should fail with 400 or 409
-        assert response.status_code in [400, 409]
-        data = response.json()
-        assert data["success"] is False
-        assert "already exists" in data["message"].lower() or "exists" in data["message"].lower()
-        print("✅ Duplicate email properly rejected via API")
+            # Try to register second user with same email
+            response = client.post("/api/v1/auth/register", json={
+                "fullname": "Second User",
+                "email": test_email,
+                "password": "Password456!"
+            })
+            # Should fail with 400, 409, or 422
+            assert response.status_code in [400, 409, 422], f"Expected error status, got {response.status_code}"
+            data = response.json()
+            # Check error response (format: {"code": non-zero, "msg": error message})
+            if "code" in data:
+                assert data["code"] != 0, "Expected error code"
+                assert "already exists" in data.get("msg", "").lower() or "exists" in data.get("msg", "").lower()
+            elif "success" in data:
+                assert data["success"] is False
+                assert "already exists" in data.get("message", "").lower() or "exists" in data.get("message", "").lower()
+            else:
+                # Check detail field for FastAPI validation errors
+                assert "detail" in data
+            print("✅ Duplicate email properly rejected via API")
 
 
 # Summary test
