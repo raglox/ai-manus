@@ -15,6 +15,44 @@ from typing import Dict, Any
 pytestmark = pytest.mark.integration
 
 
+# Global Beanie initialization flag
+_beanie_initialized = False
+
+
+async def init_beanie_for_tests():
+    """Initialize Beanie ODM for integration tests"""
+    global _beanie_initialized
+    
+    if _beanie_initialized:
+        return
+    
+    from beanie import init_beanie
+    from app.infrastructure.storage.mongodb import get_mongodb
+    from app.infrastructure.models.documents import (
+        AgentDocument,
+        SessionDocument, 
+        UserDocument,
+        SubscriptionDocument
+    )
+    from app.core.config import get_settings
+    
+    settings = get_settings()
+    mongodb = get_mongodb()
+    
+    # Initialize MongoDB connection first
+    await mongodb.initialize()
+    print("✅ MongoDB connection initialized")
+    
+    # Now initialize Beanie ODM
+    await init_beanie(
+        database=mongodb.client[settings.mongodb_database],
+        document_models=[AgentDocument, SessionDocument, UserDocument, SubscriptionDocument]
+    )
+    
+    _beanie_initialized = True
+    print("✅ Beanie ODM initialized for tests")
+
+
 class TestDatabaseIntegration:
     """Test database integration"""
     
@@ -46,6 +84,9 @@ class TestDatabaseIntegration:
     @pytest.mark.asyncio
     async def test_user_repository_integration(self):
         """Test User repository with real database"""
+        # Initialize Beanie first
+        await init_beanie_for_tests()
+        
         from app.infrastructure.repositories.user_repository import MongoUserRepository as UserRepository
         from app.domain.models.user import User, UserRole
         from datetime import datetime, UTC
@@ -146,6 +187,9 @@ class TestAuthServiceIntegration:
     @pytest.fixture
     async def auth_service(self):
         """Create AuthService with real repositories"""
+        # Initialize Beanie first
+        await init_beanie_for_tests()
+        
         from app.application.services.auth_service import AuthService
         from app.infrastructure.repositories.user_repository import MongoUserRepository as UserRepository
         from app.application.services.token_service import TokenService
@@ -213,6 +257,9 @@ class TestSessionServiceIntegration:
     @pytest.fixture
     async def session_service(self):
         """Create Session Repository (no SessionService exists)"""
+        # Initialize Beanie first
+        await init_beanie_for_tests()
+        
         from app.infrastructure.repositories.mongo_session_repository import MongoSessionRepository
         
         return MongoSessionRepository()
@@ -226,11 +273,13 @@ class TestSessionServiceIntegration:
         
         test_user_id = f"test_user_{uuid.uuid4().hex[:8]}"
         session_id = f"test_session_{uuid.uuid4().hex[:8]}"
+        agent_id = f"test_agent_{uuid.uuid4().hex[:8]}"
         
         # Create session object
         session = Session(
             id=session_id,
             user_id=test_user_id,
+            agent_id=agent_id,
             agent_type="integration_test",
             status=SessionStatus.PENDING,
             created_at=datetime.now(UTC),
@@ -279,8 +328,8 @@ class TestFileServiceIntegration:
         from io import BytesIO
         import uuid
         
-        # Get MongoDB instance
-        mongodb = await get_mongodb()
+        # Get MongoDB instance (not async)
+        mongodb = get_mongodb()
         
         # Create file service
         file_service = GridFSFileStorage(mongodb)
@@ -292,12 +341,21 @@ class TestFileServiceIntegration:
         
         try:
             # Upload file
-            file_id = await file_service.upload(file_stream, test_filename)
-            assert file_id is not None
+            file_info = await file_service.upload_file(
+                file_stream, 
+                test_filename,
+                user_id="integration_test"
+            )
+            assert file_info is not None
+            assert file_info.id is not None
+            file_id = file_info.id
             print(f"✅ File uploaded: {file_id}")
             
             # Download file
-            downloaded_stream = await file_service.download(file_id)
+            downloaded_stream, file_info = await file_service.download_file(
+                file_id,
+                user_id="integration_test"
+            )
             assert downloaded_stream is not None
             
             # Verify content
@@ -305,16 +363,19 @@ class TestFileServiceIntegration:
             assert downloaded_content == test_content
             print(f"✅ File downloaded and content verified")
             
-            # Get metadata
-            metadata = await file_service.get_metadata(file_id)
-            assert metadata is not None
-            assert metadata['filename'] == test_filename
+            # Get file info
+            file_info = await file_service.get_file_info(
+                file_id,
+                user_id="integration_test"
+            )
+            assert file_info is not None
+            assert file_info.filename == test_filename
             print(f"✅ File metadata retrieved")
             
         finally:
             # Cleanup
             try:
-                await file_service.delete(file_id)
+                await file_service.delete_file(file_id, user_id="integration_test")
                 print(f"✅ File cleaned up")
             except Exception as e:
                 print(f"⚠️  Cleanup warning: {e}")
@@ -395,6 +456,9 @@ class TestErrorHandlingIntegration:
     @pytest.mark.asyncio
     async def test_auth_service_handles_duplicate_email(self):
         """Test that duplicate email registration fails gracefully"""
+        # Initialize Beanie first
+        await init_beanie_for_tests()
+        
         from app.application.services.auth_service import AuthService
         from app.infrastructure.repositories.user_repository import MongoUserRepository as UserRepository
         from app.application.services.token_service import TokenService
