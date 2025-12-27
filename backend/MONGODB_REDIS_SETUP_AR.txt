@@ -1,0 +1,179 @@
+════════════════════════════════════════════════════════════════
+🗄️ إعداد MongoDB و Redis - مطلوب للنشر
+════════════════════════════════════════════════════════════════
+
+⚠️ بعد إعطاء صلاحيات Google Cloud، ستحتاج أيضاً:
+
+════════════════════════════════════════════════════════════════
+📦 الخيار 1: MongoDB Atlas (موصى به - مجاني)
+════════════════════════════════════════════════════════════════
+
+1️⃣ اذهب إلى: https://www.mongodb.com/cloud/atlas/register
+
+2️⃣ أنشئ حساب جديد (مجاني)
+
+3️⃣ اختر:
+   - FREE Tier (M0)
+   - Provider: Google Cloud
+   - Region: us-central1 (أو أقرب منطقة)
+
+4️⃣ اضغط "Create Cluster" وانتظر 5 دقائق
+
+5️⃣ إعداد الوصول:
+   - اضغط "Database Access" → "Add New Database User"
+   - Username: manus_user
+   - Password: احفظ كلمة المرور!
+   - اضغط "Add User"
+
+6️⃣ السماح بالاتصال:
+   - اضغط "Network Access" → "Add IP Address"
+   - اختر "Allow Access from Anywhere" (0.0.0.0/0)
+   - اضغط "Confirm"
+
+7️⃣ احصل على Connection String:
+   - اضغط "Clusters" → "Connect"
+   - اختر "Connect your application"
+   - انسخ الـ Connection String:
+   
+   mongodb+srv://manus_user:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+
+   ⚠️ استبدل <password> بكلمة المرور الفعلية
+
+8️⃣ احفظ هذا String - ستحتاجه لاحقاً!
+
+════════════════════════════════════════════════════════════════
+🔴 الخيار 2: Redis Cloud (موصى به - مجاني)
+════════════════════════════════════════════════════════════════
+
+1️⃣ اذهب إلى: https://redis.com/try-free/
+
+2️⃣ أنشئ حساب جديد
+
+3️⃣ اختر:
+   - Fixed Plan (مجاني)
+   - Provider: Google Cloud Platform
+   - Region: us-central1
+
+4️⃣ اضغط "Create subscription"
+
+5️⃣ احصل على معلومات الاتصال:
+   - اضغط على database الذي تم إنشاؤه
+   - احفظ:
+     * Public endpoint: redis-xxxxx.redis.cloud:xxxxx
+     * Username: default
+     * Password: xxxxxxxxxx
+
+6️⃣ يمكنك أيضاً الحصول على Redis URL الكامل:
+   redis://default:YOUR_PASSWORD@redis-xxxxx.redis.cloud:xxxxx
+
+7️⃣ احفظ هذه المعلومات - ستحتاجها لاحقاً!
+
+════════════════════════════════════════════════════════════════
+💰 التكاليف
+════════════════════════════════════════════════════════════════
+
+MongoDB Atlas (M0):     مجاني - 512 MB
+Redis Cloud (Free):     مجاني - 30 MB
+MongoDB Atlas (M10):    $9/شهر - 10 GB
+Redis Cloud (Paid):     $5/شهر - 250 MB
+
+الـ Free Tier كافي للبدء! ✅
+
+════════════════════════════════════════════════════════════════
+🔒 بدائل أخرى (اختياري)
+════════════════════════════════════════════════════════════════
+
+إذا كان لديك بالفعل MongoDB أو Redis:
+
+✅ MongoDB محلي أو على خادم خاص:
+   mongodb://username:password@host:27017/manus
+
+✅ Redis محلي أو على خادم خاص:
+   redis://username:password@host:6379
+
+✅ Google Cloud Memorystore (Redis):
+   - أغلى ($45/شهر تقريباً)
+   - لكن مُدار بالكامل
+
+════════════════════════════════════════════════════════════════
+📝 المعلومات التي ستحتاجها بعد الانتهاء
+════════════════════════════════════════════════════════════════
+
+احفظ هذه المعلومات وأعطيني إياها:
+
+1️⃣ MongoDB Connection String:
+   mongodb+srv://username:password@cluster.mongodb.net/manus
+
+2️⃣ Redis Connection Info (اختر واحد):
+   
+   الطريقة 1 - معلومات منفصلة:
+   - REDIS_HOST: redis-xxxxx.redis.cloud
+   - REDIS_PORT: xxxxx
+   - REDIS_PASSWORD: xxxxxxxxxx
+   
+   الطريقة 2 - URL كامل:
+   - redis://default:password@redis-xxxxx.redis.cloud:xxxxx
+
+════════════════════════════════════════════════════════════════
+⏱️ الوقت المطلوب
+════════════════════════════════════════════════════════════════
+
+MongoDB Atlas:    5-10 دقائق
+Redis Cloud:      3-5 دقائق
+الإجمالي:        10-15 دقيقة
+
+════════════════════════════════════════════════════════════════
+✅ Checklist
+════════════════════════════════════════════════════════════════
+
+قبل أن تخبرني "جاهز"، تأكد أن لديك:
+
+□ MongoDB Atlas Cluster تم إنشاؤه
+□ MongoDB User تم إضافته
+□ MongoDB Network Access تم السماح به (0.0.0.0/0)
+□ MongoDB Connection String محفوظ
+□ Redis Cloud Database تم إنشاؤه
+□ Redis Connection Info محفوظة
+
+════════════════════════════════════════════════════════════════
+🚀 الخطوات التالية
+════════════════════════════════════════════════════════════════
+
+بعد إعداد MongoDB و Redis:
+
+1. تأكد أن صلاحيات Google Cloud تمت (من الملف السابق)
+2. احفظ MongoDB Connection String
+3. احفظ Redis Connection Info
+4. أخبرني: "جاهز - MongoDB و Redis معدّين"
+5. أعطيني المعلومات
+6. سأكمل النشر تلقائياً! 🎯
+
+════════════════════════════════════════════════════════════════
+❓ إذا واجهت مشاكل
+════════════════════════════════════════════════════════════════
+
+MongoDB:
+- تأكد من Network Access → 0.0.0.0/0
+- تأكد من Database User صحيح
+- تأكد من استبدال <password> في Connection String
+
+Redis:
+- استخدم Public Endpoint وليس Private
+- احفظ Password بشكل صحيح
+- جرب الاتصال من Redis CLI أولاً (اختياري)
+
+════════════════════════════════════════════════════════════════
+💡 نصيحة
+════════════════════════════════════════════════════════════════
+
+✅ MongoDB Atlas و Redis Cloud كلاهما:
+   - مجاني للبدء
+   - سهل الإعداد (15 دقيقة)
+   - مُدار بالكامل
+   - موثوق
+   - يعمل مع Google Cloud بشكل مثالي
+
+لا تضيع الوقت في إعداد MongoDB/Redis محلي الآن!
+استخدم الخدمات المُدارة وابدأ سريعاً 🚀
+
+════════════════════════════════════════════════════════════════
