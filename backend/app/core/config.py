@@ -4,9 +4,14 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     
-    # Model provider configuration
+    # LLM Provider configuration
+    llm_provider: str = "deepseek"  # "deepseek", "blackbox", "openai"
     api_key: str | None = None
     api_base: str = "https://api.deepseek.com/v1"
+    
+    # Blackbox AI configuration
+    blackbox_api_key: str | None = None  # Blackbox API key
+    blackbox_api_base: str = "https://api.blackbox.ai"
     
     # Model configuration
     model_name: str = "deepseek-chat"
