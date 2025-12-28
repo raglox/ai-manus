@@ -27,7 +27,9 @@ class LLMJsonParser(JsonParser):
     """
     
     def __init__(self):
-        self.llm = OpenAILLM()
+        # Use the LLM factory to get the configured LLM client
+        from app.infrastructure.external.llm.factory import get_llm_client
+        self.llm = get_llm_client()
         self.strategies = [
             self._try_direct_parse,
             self._try_markdown_block_parse,

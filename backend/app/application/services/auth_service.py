@@ -1,4 +1,5 @@
 import hashlib
+import base64
 import secrets
 from typing import Optional
 from datetime import datetime
@@ -33,13 +34,13 @@ class AuthService:
         salt_bytes = salt.encode('utf-8')
         
         # Use configured rounds
-        rounds = self.settings.password_hash_rounds or 10
+        rounds = int(self.settings.password_hash_rounds or 100000)
         
         # Generate hash
         hash_bytes = hashlib.pbkdf2_hmac('sha256', password_bytes, salt_bytes, rounds)
         
-        # Return salt + hash as hex string
-        return salt + hash_bytes.hex()
+        # Return salt + hash as base64 string
+        return salt + base64.b64encode(hash_bytes).decode('utf-8')
     
     def _verify_password(self, password: str, password_hash: str) -> bool:
         """Verify password against hash"""
@@ -164,21 +165,43 @@ class AuthService:
     
     async def login_with_tokens(self, email: str, password: str) -> AuthToken:
         """Authenticate user and return JWT tokens"""
-        user = await self.authenticate_user(email, password)
-        
-        if not user:
-            raise UnauthorizedError("Invalid email or password")
-        
-        # Generate JWT tokens
-        access_token = self.token_service.create_access_token(user)
-        refresh_token = self.token_service.create_refresh_token(user)
-        
-        return AuthToken(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_type="bearer",
-            user=user
-        )
+        try:
+            logger.info(f"=== Login Start: {email} ===")
+            
+            # Step 1: Find user
+            logger.info("Step 1: Finding user...")
+            # We need to call authenticate_user but we want to log inside it or log the result here.
+            # Since authenticate_user does the heavy lifting, let's wrap it or log around it.
+            
+            user = await self.authenticate_user(email, password)
+            logger.info(f"User authenticated: {user is not None}")
+            
+            if not user:
+                logger.error("Authentication failed (User not found or invalid password)")
+                raise UnauthorizedError("Invalid email or password")
+            
+            # Step 2: Create tokens
+            logger.info("Step 2: Creating JWT tokens...")
+            access_token = self.token_service.create_access_token(user)
+            logger.info(f"Access token created: {access_token[:20]}...")
+            
+            refresh_token = self.token_service.create_refresh_token(user)
+            logger.info(f"Refresh token created: {refresh_token[:20]}...")
+            
+            logger.info("=== Login Success ===")
+            return AuthToken(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                token_type="bearer",
+                user=user
+            )
+            
+        except Exception as e:
+            logger.error(f"=== Login Failed ===")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception message: {str(e)}")
+            logger.exception("Full traceback:")
+            raise
     
     async def refresh_access_token(self, refresh_token: str) -> AuthToken:
         """Refresh access token using refresh token"""

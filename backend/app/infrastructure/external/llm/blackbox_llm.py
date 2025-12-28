@@ -10,7 +10,7 @@ import logging
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
-from app.domain.models.llm import LLM, LLMResponse, StreamChunk
+from app.domain.external.llm import LLM, LLMResponse, StreamChunk
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +104,8 @@ class BlackboxLLM(LLM):
         self.api_key = api_key
         self.base_url = "https://api.blackbox.ai"
         self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        self._temperature = temperature
+        self._max_tokens = max_tokens
         self.kwargs = kwargs
         
         # Initialize OpenAI client pointing to Blackbox API
@@ -404,3 +404,28 @@ class BlackboxLLM(LLM):
             logger.info("Closed Blackbox LLM client")
         except Exception as e:
             logger.error(f"Error closing Blackbox client: {e}")
+    
+    @property
+    def model_name(self) -> str:
+        """Get the model name"""
+        return self.model
+    
+    @property
+    def temperature(self) -> float:
+        """Get the temperature"""
+        return self._temperature
+    
+    @temperature.setter
+    def temperature(self, value: float) -> None:
+        """Set the temperature"""
+        self._temperature = value
+    
+    @property
+    def max_tokens(self) -> int:
+        """Get the max tokens"""
+        return self._max_tokens
+    
+    @max_tokens.setter
+    def max_tokens(self, value: int) -> None:
+        """Set the max tokens"""
+        self._max_tokens = value

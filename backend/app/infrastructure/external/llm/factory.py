@@ -6,7 +6,7 @@ from typing import Optional
 import logging
 
 from app.core.config import get_settings
-from app.domain.models.llm import LLM
+from app.domain.external.llm import LLM
 from app.infrastructure.external.llm.openai_llm import OpenAILLM
 from app.infrastructure.external.llm.blackbox_llm import BlackboxLLM
 

@@ -30,7 +30,14 @@ class MongoUserRepository(UserRepository):
         """Get user by ID"""
         logger.debug(f"Getting user by ID: {user_id}")
         
-        user_doc = await UserDocument.find_one(UserDocument.user_id == user_id)
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
+        user_doc = await UserDocument.find_one({"user_id": user_id})
         if not user_doc:
             logger.debug(f"User not found: {user_id}")
             return None
@@ -41,7 +48,14 @@ class MongoUserRepository(UserRepository):
         """Get user by fullname"""
         logger.debug(f"Getting user by fullname: {fullname}")
         
-        user_doc = await UserDocument.find_one(UserDocument.fullname == fullname)
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
+        user_doc = await UserDocument.find_one({"fullname": fullname})
         if not user_doc:
             logger.debug(f"User not found: {fullname}")
             return None
@@ -50,9 +64,16 @@ class MongoUserRepository(UserRepository):
     
     async def get_user_by_email(self, email: str) -> Optional[User]:
         """Get user by email"""
-        logger.debug(f"Getting user by email: {email}")
+        logger.debug(f"Getting user by email: {email} (v3 fix)")
         
-        user_doc = await UserDocument.find_one(UserDocument.email == email.lower())
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
+        user_doc = await UserDocument.find_one({"email": email.lower()})
         if not user_doc:
             logger.debug(f"User not found: {email}")
             return None
@@ -63,8 +84,15 @@ class MongoUserRepository(UserRepository):
         """Update user information"""
         logger.info(f"Updating user: {user.id}")
         
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
         # Find existing document
-        user_doc = await UserDocument.find_one(UserDocument.user_id == user.id)
+        user_doc = await UserDocument.find_one({"user_id": user.id})
         if not user_doc:
             raise ValueError(f"User not found: {user.id}")
         
@@ -83,7 +111,14 @@ class MongoUserRepository(UserRepository):
         """Delete user by ID"""
         logger.info(f"Deleting user: {user_id}")
         
-        user_doc = await UserDocument.find_one(UserDocument.user_id == user_id)
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
+        user_doc = await UserDocument.find_one({"user_id": user_id})
         if not user_doc:
             logger.warning(f"User not found for deletion: {user_id}")
             return False
@@ -96,6 +131,13 @@ class MongoUserRepository(UserRepository):
         """List users with pagination"""
         logger.debug(f"Listing users: limit={limit}, offset={offset}")
         
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
         user_docs = await UserDocument.find().skip(offset).limit(limit).to_list()
         
         users = [doc.to_domain() for doc in user_docs]
@@ -106,7 +148,14 @@ class MongoUserRepository(UserRepository):
         """Check if fullname exists"""
         logger.debug(f"Checking if fullname exists: {fullname}")
         
-        user_doc = await UserDocument.find_one(UserDocument.fullname == fullname)
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
+        user_doc = await UserDocument.find_one({"fullname": fullname})
         exists = user_doc is not None
         logger.debug(f"Fullname exists: {exists}")
         return exists
@@ -115,7 +164,14 @@ class MongoUserRepository(UserRepository):
         """Check if email exists"""
         logger.debug(f"Checking if email exists: {email}")
         
-        user_doc = await UserDocument.find_one(UserDocument.email == email.lower())
+        # Ensure Beanie is initialized before querying
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        if not mongodb.is_beanie_initialized:
+            logger.warning("Beanie not initialized, attempting lazy initialization...")
+            await mongodb.initialize()
+        
+        user_doc = await UserDocument.find_one({"email": email.lower()})
         exists = user_doc is not None
         logger.debug(f"Email exists: {exists}")
-        return exists 
+        return exists

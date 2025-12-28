@@ -1,4 +1,16 @@
 from typing import List, Dict, Any, Optional, Protocol
+from pydantic import BaseModel
+
+class LLMResponse(BaseModel):
+    content: str
+    model: str
+    usage: Dict[str, int]
+    finish_reason: str
+    raw_response: Dict[str, Any]
+
+class StreamChunk(BaseModel):
+    delta: Optional[str]
+    finish_reason: Optional[str]
 
 class LLM(Protocol):
     """AI service gateway interface for interacting with AI services"""

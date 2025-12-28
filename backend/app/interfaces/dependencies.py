@@ -19,7 +19,7 @@ from app.application.services.email_service import EmailService
 from app.infrastructure.external.cache import get_cache
 
 # Import all required dependencies for agent service
-from app.infrastructure.external.llm.openai_llm import OpenAILLM
+from app.infrastructure.external.llm.factory import get_llm_client
 from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 from app.infrastructure.external.task.redis_task import RedisStreamTask
 from app.infrastructure.utils.llm_json_parser import LLMJsonParser
@@ -48,7 +48,7 @@ def get_agent_service() -> AgentService:
     logger.info("Creating AgentService instance")
     
     # Create all dependencies
-    llm = OpenAILLM()
+    llm = get_llm_client()
     agent_repository = MongoAgentRepository()
     session_repository = MongoSessionRepository()
     sandbox_cls = DockerSandbox
