@@ -5,6 +5,7 @@ import logging
 import asyncio
 from app.core.config import get_settings
 from functools import lru_cache
+from beanie import init_beanie
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,7 @@ class MongoDB:
     def __init__(self):
         self._client: Optional[AsyncIOMotorClient] = None
         self._settings = get_settings()
+        self._beanie_initialized = False
     
     async def initialize(self, max_retries: int = 5, retry_delay: float = 2.0) -> None:
         """Initialize MongoDB connection with retry logic and proper timeouts.
@@ -20,7 +22,7 @@ class MongoDB:
             max_retries: Maximum number of connection attempts (default: 5)
             retry_delay: Delay between retries in seconds (default: 2.0)
         """
-        if self._client is not None:
+        if self._client is not None and self._beanie_initialized:
             return
         
         last_error = None
@@ -63,6 +65,27 @@ class MongoDB:
                 
                 logger.info(f"✅ Successfully connected to MongoDB on attempt {attempt}")
                 logger.info(f"MongoDB URI: {self._settings.mongodb_uri[:20]}...")
+                
+                # Initialize Beanie ODM
+                if not self._beanie_initialized:
+                    logger.info("🔧 Initializing Beanie ODM...")
+                    from app.infrastructure.models.documents import (
+                        AgentDocument, SessionDocument, UserDocument, SubscriptionDocument
+                    )
+                    
+                    database = self._client[self._settings.mongodb_database]
+                    await init_beanie(
+                        database=database,
+                        document_models=[
+                            AgentDocument,
+                            SessionDocument,
+                            UserDocument,
+                            SubscriptionDocument
+                        ]
+                    )
+                    self._beanie_initialized = True
+                    logger.info(f"✅ Beanie ODM initialized with database: {self._settings.mongodb_database}")
+                
                 return
                 
             except asyncio.TimeoutError as e:
@@ -102,6 +125,11 @@ class MongoDB:
             logger.warning("⚠️ MongoDB accessed before initialization - returning None")
             logger.warning("⚠️ Application running in degraded mode without MongoDB")
         return self._client
+    
+    @property
+    def is_beanie_initialized(self) -> bool:
+        """Check if Beanie is initialized"""
+        return self._beanie_initialized
 
 
 @lru_cache()
