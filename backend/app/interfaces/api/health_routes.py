@@ -220,3 +220,100 @@ async def sentry_debug():
         "dsn_set": bool(os.getenv("SENTRY_DSN")),
         "message": "Sentry is configured and ready to capture errors"
     }
+
+
+@router.get("/debug/redis", status_code=status.HTTP_200_OK)
+async def debug_redis():
+    """
+    Debug endpoint to test Redis connectivity with detailed error messages
+    
+    Returns detailed Redis connection information and errors
+    """
+    result = {
+        "redis_host": os.getenv("REDIS_HOST", "unknown"),
+        "redis_port": os.getenv("REDIS_PORT", "unknown"),
+        "redis_password": "***" if os.getenv("REDIS_PASSWORD") else "not set",
+        "connection_attempts": [],
+        "final_status": "unknown"
+    }
+    
+    try:
+        from app.infrastructure.storage.redis import get_redis
+        import asyncio
+        
+        redis = get_redis()
+        
+        # Attempt 1: Check if already initialized
+        if redis._client is not None:
+            result["connection_attempts"].append({
+                "attempt": 0,
+                "status": "already_initialized",
+                "message": "Redis client already exists"
+            })
+            
+            # Try to ping
+            try:
+                await asyncio.wait_for(redis.client.ping(), timeout=5.0)
+                result["final_status"] = "healthy"
+                result["message"] = "Redis already initialized and responding to ping"
+                return result
+            except Exception as ping_error:
+                result["connection_attempts"].append({
+                    "attempt": 0,
+                    "status": "ping_failed",
+                    "error": str(ping_error),
+                    "error_type": type(ping_error).__name__
+                })
+        
+        # Attempt 2: Initialize with detailed logging
+        result["connection_attempts"].append({
+            "attempt": 1,
+            "status": "starting",
+            "message": "Attempting Redis initialization..."
+        })
+        
+        try:
+            await redis.initialize(max_retries=3, retry_delay=1.0)
+            
+            if redis._client is not None:
+                # Test ping
+                await asyncio.wait_for(redis.client.ping(), timeout=5.0)
+                result["final_status"] = "healthy"
+                result["message"] = "Redis initialized successfully and responding to ping"
+                result["connection_attempts"].append({
+                    "attempt": 1,
+                    "status": "success",
+                    "message": "Initialized and ping successful"
+                })
+            else:
+                result["final_status"] = "failed"
+                result["message"] = "Redis initialization returned None client"
+                result["connection_attempts"].append({
+                    "attempt": 1,
+                    "status": "failed",
+                    "error": "Client is None after initialization"
+                })
+                
+        except Exception as init_error:
+            result["final_status"] = "error"
+            result["message"] = f"Redis initialization failed: {str(init_error)}"
+            result["connection_attempts"].append({
+                "attempt": 1,
+                "status": "error",
+                "error": str(init_error),
+                "error_type": type(init_error).__name__
+            })
+            
+            # Add traceback for debugging
+            import traceback
+            result["traceback"] = traceback.format_exc()
+            
+    except Exception as e:
+        result["final_status"] = "error"
+        result["message"] = f"Unexpected error: {str(e)}"
+        result["error_type"] = type(e).__name__
+        
+        import traceback
+        result["traceback"] = traceback.format_exc()
+    
+    return result
