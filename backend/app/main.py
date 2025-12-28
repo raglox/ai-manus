@@ -19,6 +19,7 @@ from app.infrastructure.models.documents import AgentDocument, SessionDocument, 
 from app.infrastructure.middleware import BillingMiddleware
 from app.infrastructure.middleware.rate_limit import SimpleRateLimiter
 from app.infrastructure.middleware.advanced_rate_limit import create_rate_limiter, get_rate_limit
+from app.infrastructure.middleware.cors_handler import CORSHeaderMiddleware
 from app.infrastructure.repositories.subscription_repository import MongoSubscriptionRepository
 from beanie import init_beanie
 from slowapi import Limiter
@@ -134,13 +135,30 @@ app = FastAPI(title="Manus AI Agent", lifespan=lifespan)
 # Attach limiter to app for SlowAPI
 app.state.limiter = limiter
 
-# Configure CORS
+# Add CORS Header Middleware (MUST be first to catch all responses including errors)
+app.add_middleware(
+    CORSHeaderMiddleware,
+    allowed_origins=[
+        "http://34.121.111.2",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
+)
+
+# Configure CORS - Allow frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://34.121.111.2",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "*"  # Allow all for development
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Add Rate Limiting Middleware (for webhook protection)
