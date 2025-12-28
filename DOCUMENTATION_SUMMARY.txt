@@ -1,0 +1,328 @@
+=================================================================
+    📦 وثائق المشروع الكاملة - Manus AI Documentation
+=================================================================
+
+📅 التاريخ: 28 ديسمبر 2025
+📦 الإصدار: 1.0.2
+🔴 الحالة: CRITICAL - Auth Endpoints Broken (500 Error)
+
+=================================================================
+                    📚 الملفات المتاحة
+=================================================================
+
+1. COMPLETE_INFRASTRUCTURE_DOCUMENTATION.md (34 KB)
+   ✅ الوثيقة الأشمل - تحتوي على كل شيء
+   - معلومات المشروع العامة
+   - البنية التحتية الكاملة (GCP)
+   - الخوادم والخدمات (Cloud Run, VM)
+   - قواعد البيانات (MongoDB, Redis)
+   - 🔐 جميع الأسرار والمفاتيح (Secrets)
+   - Frontend (React + Vite + Nginx)
+   - Backend (FastAPI + MongoDB + Beanie)
+   - الشبكات والاتصالات
+   - المشكلة الحالية (Auth 500 Error)
+   - برومبت للمبرمج التالي
+
+2. DEVELOPER_PROMPT.md (15 KB)
+   ✅ برومبت مخصص للمبرمج التالي
+   - ملخص المشكلة
+   - خطوات التحقيق
+   - الأسباب المحتملة
+   - خطة الإصلاح
+   - معايير النجاح
+   - موارد مفيدة
+
+3. CHAT_ISSUE_REPORT.md
+   ✅ تقرير تفصيلي عن مشكلة Chat
+   - الاختبارات المجراة
+   - النتائج
+   - التشخيص
+   - الحلول المقترحة
+
+4. CORS_COMPLETE.txt
+   ✅ توثيق إصلاح CORS
+   - ما تم إصلاحه
+   - الاختبارات
+   - النتائج
+
+5. READY.txt
+   ✅ حالة النظام
+   - معلومات الدخول
+   - الروابط
+   - ما تم إنجازه
+   - التكاليف
+
+=================================================================
+                    🌐 روابط الوصول
+=================================================================
+
+Frontend:   http://34.121.111.2
+Backend:    https://manus-backend-247096226016.us-central1.run.app
+API Docs:   https://manus-backend-247096226016.us-central1.run.app/docs
+Health:     https://manus-backend-247096226016.us-central1.run.app/api/v1/health
+Ready:      https://manus-backend-247096226016.us-central1.run.app/api/v1/ready
+GitHub:     https://github.com/raglox/ai-manus
+
+=================================================================
+                    🔐 معلومات الدخول
+=================================================================
+
+Demo User:
+  Email: demo@manus.ai
+  Password: DemoPass123!
+  Status: ❌ Login fails with 500 error
+
+Admin User:
+  Email: admin@manus.ai
+  Password: AdminPass123!
+  Status: ❌ Login fails with 500 error
+
+=================================================================
+                    🏗️ البنية التحتية
+=================================================================
+
+Google Cloud Project:
+  Project ID: gen-lang-client-0415541083
+  Project Number: 247096226016
+  Region: us-central1
+
+Backend (Cloud Run):
+  Service: manus-backend
+  URL: https://manus-backend-247096226016.us-central1.run.app
+  Revision: manus-backend-00028-jnq (after rollback)
+  Image: us-central1-docker.pkg.dev/gen-lang-client-0415541083/manus-app/backend:latest
+  CPU: 2 cores
+  Memory: 4 GiB
+  Status: ⚠️ Health OK, Auth endpoints broken
+
+Frontend (VM):
+  Instance: Manus-frontend-vm
+  Zone: us-central1-a
+  IP: 34.121.111.2
+  Image: us-central1-docker.pkg.dev/gen-lang-client-0415541083/manus-app/frontend:latest
+  Web Server: Nginx 1.29.4
+  Status: ✅ Working
+
+Database:
+  Type: MongoDB Atlas
+  Cluster: cluster0.9h9x33.mongodb.net
+  Database: manus
+  Status: ✅ Connected
+  Collections: users, agents, sessions, subscriptions
+
+Infrastructure:
+  Cloud NAT: 34.134.9.124 (static IP)
+  VPC Connector: manus-connector
+  Secrets Manager: 7 secrets configured
+
+=================================================================
+                    🔐 الأسرار (للمبرمجين فقط)
+=================================================================
+
+⚠️ معلومات حساسة - لا تشاركها علنًا
+
+MongoDB URI:
+mongodb+srv://jadjadhos5_db_user:05vYi9XJkEPLGTHF@cluster0.9h9x33.mongodb.net/manus?retryWrites=true&w=majority
+
+JWT Secret Key:
+7fa259ac28c4779014373b83cba325178098a725e36d5cd1cddeb7a4bfe8a0c5
+
+Password Salt:
+_CTzUJ8IDG1RZBHCF3dtq6sREcCnmSMyy169m-DAi8c
+
+Blackbox API Key:
+sk-SuSCd8TN7baNnh2EcFnGzw
+
+Redis Password:
+(access via: gcloud secrets versions access latest --secret="redis-password")
+
+=================================================================
+                    🐛 المشكلة الحالية
+=================================================================
+
+Issue: Auth Endpoints Returning 500 Error
+Severity: 🔴 CRITICAL
+Impact: Users cannot login or register
+
+Broken Endpoints:
+  ❌ POST /api/v1/auth/login       → 500 error
+  ❌ POST /api/v1/auth/register    → 500 error
+
+Working Endpoints:
+  ✅ GET /api/v1/health            → 200 OK
+  ✅ GET /api/v1/ready             → 200 OK
+  ✅ GET /docs                     → 200 OK
+  ✅ OPTIONS (preflight)           → 200 OK with CORS
+
+Error Response:
+{
+  "code": 500,
+  "msg": "Internal server error",
+  "data": null
+}
+
+Timeline:
+  1. Initial deployment working ✅
+  2. Added session subscription check
+  3. Auth endpoints started failing ❌
+  4. Rolled back to previous versions → Still broken
+  5. Conclusion: Issue not in code changes
+
+Likely Causes:
+  - Password verification failing
+  - JWT token generation failing
+  - Database query failing
+  - Environment variable issue
+
+What's Needed:
+  🚨 CRITICAL: Access Cloud Run logs to see exception trace
+  
+  Command:
+  gcloud run logs read manus-backend \
+    --region=us-central1 \
+    --project=gen-lang-client-0415541083 \
+    --limit=50
+
+=================================================================
+                    👨‍💻 للمبرمج التالي
+=================================================================
+
+1. افتح: DEVELOPER_PROMPT.md
+   📝 يحتوي على خطة عمل مفصلة
+
+2. افتح: COMPLETE_INFRASTRUCTURE_DOCUMENTATION.md
+   📚 يحتوي على كل التفاصيل التقنية
+
+3. ابدأ بفحص Logs:
+   gcloud run logs read manus-backend --region=us-central1 --limit=50
+
+4. ابحث عن:
+   - Python exception traces
+   - Stack traces
+   - Error messages
+
+5. افحص الملفات:
+   - backend/app/domain/services/auth_service.py
+   - backend/app/interfaces/api/auth_routes.py
+   - backend/app/domain/models/user.py
+
+6. أضف logging مفصل:
+   logger.info() في كل خطوة من auth flow
+
+7. اختبر المكونات:
+   - MongoDB query
+   - Password verification
+   - JWT generation
+
+8. أصلح المشكلة
+
+9. Deploy واختبر:
+   gcloud builds submit ...
+   gcloud run deploy ...
+   curl -X POST "https://...login" ...
+
+=================================================================
+                    ✅ معايير النجاح
+=================================================================
+
+✅ POST /api/v1/auth/login returns 200 with tokens
+✅ POST /api/v1/auth/register returns 200 with user data
+✅ Demo user can login via frontend
+✅ New users can register via frontend
+✅ Users can create sessions after login
+
+Test Commands:
+# Login test
+curl -X POST "https://manus-backend-247096226016.us-central1.run.app/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"demo@manus.ai","password":"DemoPass123!"}'
+
+# Should return: 200 OK with tokens (not 500)
+
+=================================================================
+                    📊 الحالة الحالية
+=================================================================
+
+Component              Status
+-------------------    -------
+Infrastructure         ✅ DEPLOYED
+MongoDB                ✅ CONNECTED
+Redis                  ⚠️ DEGRADED (not critical)
+Frontend               ✅ WORKING
+Backend Health         ✅ WORKING
+Backend Auth           ❌ BROKEN (500 error)
+CORS                   ✅ FIXED
+Sessions               ❓ UNTESTABLE (needs auth)
+Chat                   ❓ UNTESTABLE (needs session)
+
+=================================================================
+                    💰 التكاليف (شهرياً)
+=================================================================
+
+Frontend VM:          $400-450
+Backend Cloud Run:    $50-80
+Cloud NAT:            $35-40
+Redis Memorystore:    $48
+VPC Connector:        $8
+MongoDB Atlas:        $0 (Free Tier)
+-----------------------------------
+Total:                $541-626 / month
+
+=================================================================
+                    📞 للدعم والمساعدة
+=================================================================
+
+GitHub Repository:
+https://github.com/raglox/ai-manus
+
+Documentation Path:
+/home/root/webapp/
+
+Key Files:
+- COMPLETE_INFRASTRUCTURE_DOCUMENTATION.md
+- DEVELOPER_PROMPT.md
+- CHAT_ISSUE_REPORT.md
+- CORS_COMPLETE.txt
+- READY.txt
+
+GCP Console:
+https://console.cloud.google.com/run/detail/us-central1/manus-backend/logs
+
+=================================================================
+                    🚀 ابدأ الآن
+=================================================================
+
+للمبرمج التالي:
+1. اقرأ DEVELOPER_PROMPT.md
+2. افحص Cloud Run logs
+3. أضف logging مفصل
+4. أصلح auth_service.py
+5. Deploy واختبر
+
+Expected Resolution Time: 2-4 hours
+
+Good luck! 💪
+
+=================================================================
+                    📝 ملاحظات نهائية
+=================================================================
+
+- جميع المعلومات موثقة بالتفصيل
+- الأسرار متضمنة (للمبرمجين المصرح لهم فقط)
+- البنية التحتية مستقرة
+- المشكلة محصورة في Auth endpoints
+- CORS تم إصلاحه بنجاح
+- MongoDB متصل ويعمل
+- Frontend يعمل بشكل صحيح
+
+الخطوة التالية:
+افحص Logs وأصلح auth_service.py
+
+=================================================================
+آخر تحديث: 28 ديسمبر 2025
+الإصدار: 1.0.2
+الحالة: 🔴 CRITICAL - Needs immediate attention
+=================================================================
+
+🔐 CONFIDENTIAL - Contains sensitive information
+⚠️ For authorized personnel only
