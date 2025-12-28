@@ -35,9 +35,5 @@ ENV PYTHONUNBUFFERED=1
 # Expose port
 EXPOSE 8000
 
-# Add health check (for Docker and Cloud Run)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
-
-# Start command
+# Start command - Cloud Run will handle health checks
 CMD ["./run.sh"] 
