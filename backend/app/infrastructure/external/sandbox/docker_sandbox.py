@@ -1074,6 +1074,14 @@ exit $EXIT_CODE
             logger.error(f"Failed to destroy Docker sandbox: {str(e)}")
             return False
     
+    def supports_browser(self) -> bool:
+        """Check if sandbox supports browser automation.
+        
+        Returns:
+            True - DockerSandbox always supports browser/CDP access
+        """
+        return True
+    
     async def get_browser(self) -> Browser:
         """Get browser instance
         

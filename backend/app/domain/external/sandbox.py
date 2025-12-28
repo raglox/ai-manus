@@ -402,3 +402,19 @@ class Sandbox(Protocol):
             await sandbox.kill_background_process(pattern="http.server")
         """
         ...
+    
+    def supports_browser(self) -> bool:
+        """Check if sandbox supports browser automation.
+        
+        Returns:
+            True if sandbox can provide browser/CDP access, False otherwise.
+            
+        Example:
+            if sandbox.supports_browser():
+                browser = await sandbox.get_browser()
+                # Use browser for automation
+            else:
+                # Use alternative tools like web search
+                pass
+        """
+        ...

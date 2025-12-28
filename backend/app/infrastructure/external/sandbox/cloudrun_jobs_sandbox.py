@@ -1140,6 +1140,16 @@ class CloudRunJobsSandbox(Sandbox):
             logger.error(f"Failed to destroy sandbox: {e}")
             return False
     
+    def supports_browser(self) -> bool:
+        """Check if sandbox supports browser automation.
+        
+        Returns:
+            False - CloudRunJobsSandbox does not support browser/CDP access.
+                   Cloud Run Jobs are ephemeral and cannot maintain persistent
+                   CDP connections required for browser automation.
+        """
+        return False
+    
     async def get_browser(self) -> Browser:
         """Get browser instance - Not supported in Cloud Run Jobs"""
         raise NotImplementedError(

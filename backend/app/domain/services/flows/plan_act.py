@@ -32,6 +32,7 @@ from app.domain.services.tools.file import FileTool
 from app.domain.services.tools.message import MessageTool
 from app.domain.services.tools.search import SearchTool
 from app.domain.services.tools.webdev import WebDevTool
+from app.domain.services.tools.websearch import WebSearchTool
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class PlanActFlow(BaseFlow):
         session_repository: SessionRepository,
         llm: LLM,
         sandbox: Sandbox,
-        browser: Browser,
+        browser: Optional[Browser],
         json_parser: JsonParser,
         mcp_tool: MCPTool,
         search_engine: Optional[SearchEngine] = None,
@@ -69,11 +70,19 @@ class PlanActFlow(BaseFlow):
 
         tools = [
             ShellTool(sandbox),
-            BrowserTool(browser),
             FileTool(sandbox),
             MessageTool(),
             WebDevTool(sandbox),
         ]
+        
+        # Add BrowserTool only if browser is available, otherwise use WebSearchTool
+        if browser:
+            tools.insert(1, BrowserTool(browser))
+            logger.info("BrowserTool enabled for agent")
+        else:
+            # Use WebSearchTool as alternative when browser is not available
+            tools.insert(1, WebSearchTool(llm))
+            logger.info("BrowserTool unavailable - using WebSearchTool instead")
         
         # Choose MCP implementation
         if use_mcp_sandbox:

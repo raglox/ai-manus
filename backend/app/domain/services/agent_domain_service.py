@@ -65,10 +65,16 @@ class AgentDomainService:
             sandbox = await self._sandbox_cls.create()
             session.sandbox_id = sandbox.id
             await self._session_repository.save(session)
-        browser = await sandbox.get_browser()
-        if not browser:
-            logger.error(f"Failed to get browser for Sandbox {sandbox_id}")
-            raise RuntimeError(f"Failed to get browser for Sandbox {sandbox_id}")
+        
+        # Browser is optional - only available if sandbox supports it
+        browser = None
+        if sandbox.supports_browser():
+            browser = await sandbox.get_browser()
+            if not browser:
+                logger.error(f"Failed to get browser for Sandbox {sandbox_id}")
+                raise RuntimeError(f"Failed to get browser for Sandbox {sandbox_id}")
+        else:
+            logger.info(f"Sandbox {sandbox.id} does not support browser - will use alternative tools")
         
         await self._session_repository.save(session)
 
