@@ -74,59 +74,120 @@ except Exception as e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Code executed on startup
-    logger.info("Application startup - Manus AI Agent initializing")
+    logger.info("="*80)
+    logger.info("🚀 Application startup - Manus AI Agent initializing")
+    logger.info("="*80)
     
-    # Initialize MongoDB and Beanie (with graceful failure)
+    # Initialize MongoDB and Beanie (with graceful failure and extended timeout)
     mongodb_initialized = False
     redis_initialized = False
     
+    # MongoDB initialization with extended timeout (120 seconds total)
     try:
-        await get_mongodb().initialize()
-        await init_beanie(
-            database=get_mongodb().client[settings.mongodb_database],
-            document_models=[AgentDocument, SessionDocument, UserDocument, SubscriptionDocument]
+        logger.info("📊 Starting MongoDB connection...")
+        await asyncio.wait_for(
+            get_mongodb().initialize(max_retries=5, retry_delay=3.0),
+            timeout=120.0  # 120 seconds total timeout
         )
+        
+        logger.info("📊 Initializing Beanie ODM...")
+        await asyncio.wait_for(
+            init_beanie(
+                database=get_mongodb().client[settings.mongodb_database],
+                document_models=[AgentDocument, SessionDocument, UserDocument, SubscriptionDocument]
+            ),
+            timeout=30.0  # 30 seconds for Beanie initialization
+        )
+        
         mongodb_initialized = True
         logger.info("✅ Successfully initialized MongoDB and Beanie")
+        logger.info(f"   Database: {settings.mongodb_database}")
+        
+    except asyncio.TimeoutError:
+        logger.error("❌ MongoDB initialization timed out after 120 seconds")
+        logger.warning("⚠️ Application will run in degraded mode without MongoDB")
     except Exception as e:
-        logger.warning(f"⚠️ MongoDB initialization failed: {e}. Running without MongoDB.")
+        logger.error(f"❌ MongoDB initialization failed: {str(e)}")
+        logger.warning("⚠️ Application will run in degraded mode without MongoDB")
+        # Log more details for debugging
+        import traceback
+        logger.debug(f"MongoDB error traceback:\n{traceback.format_exc()}")
     
-    # Initialize Redis (with graceful failure)
+    # Redis initialization with extended timeout (60 seconds total)
     try:
-        await get_redis().initialize()
+        logger.info("🔴 Starting Redis connection...")
+        await asyncio.wait_for(
+            get_redis().initialize(max_retries=5, retry_delay=2.0),
+            timeout=60.0  # 60 seconds total timeout
+        )
+        
         redis_initialized = True
         logger.info("✅ Successfully initialized Redis")
+        logger.info(f"   Host: {settings.redis_host}:{settings.redis_port}")
+        
+    except asyncio.TimeoutError:
+        logger.error("❌ Redis initialization timed out after 60 seconds")
+        logger.warning("⚠️ Application will run in degraded mode without Redis caching")
     except Exception as e:
-        logger.warning(f"⚠️ Redis initialization failed: {e}. Running without Redis.")
+        logger.error(f"❌ Redis initialization failed: {str(e)}")
+        logger.warning("⚠️ Application will run in degraded mode without Redis caching")
+        # Log more details for debugging
+        import traceback
+        logger.debug(f"Redis error traceback:\n{traceback.format_exc()}")
+    
+    # Startup summary
+    logger.info("="*80)
+    logger.info("🎯 Startup Summary:")
+    logger.info(f"   MongoDB: {'✅ Connected' if mongodb_initialized else '❌ Disconnected (degraded mode)'}")
+    logger.info(f"   Redis:   {'✅ Connected' if redis_initialized else '❌ Disconnected (degraded mode)'}")
+    logger.info("="*80)
+    
+    # Store initialization status in app state
+    app.state.mongodb_initialized = mongodb_initialized
+    app.state.redis_initialized = redis_initialized
     
     try:
         yield
     finally:
         # Code executed on shutdown
-        logger.info("Application shutdown - Manus AI Agent terminating")
+        logger.info("="*80)
+        logger.info("🛑 Application shutdown - Manus AI Agent terminating")
+        logger.info("="*80)
         
         # Disconnect from MongoDB
         if mongodb_initialized:
             try:
-                await get_mongodb().shutdown()
+                logger.info("Disconnecting from MongoDB...")
+                await asyncio.wait_for(get_mongodb().shutdown(), timeout=10.0)
+                logger.info("✅ MongoDB disconnected successfully")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ MongoDB shutdown timed out")
             except Exception as e:
-                logger.error(f"Error shutting down MongoDB: {e}")
+                logger.error(f"❌ Error shutting down MongoDB: {e}")
         
         # Disconnect from Redis
         if redis_initialized:
             try:
-                await get_redis().shutdown()
+                logger.info("Disconnecting from Redis...")
+                await asyncio.wait_for(get_redis().shutdown(), timeout=10.0)
+                logger.info("✅ Redis disconnected successfully")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Redis shutdown timed out")
             except Exception as e:
-                logger.error(f"Error shutting down Redis: {e}")
+                logger.error(f"❌ Error shutting down Redis: {e}")
 
-        logger.info("Cleaning up AgentService instance")
+        logger.info("Cleaning up AgentService instance...")
         try:
             await asyncio.wait_for(get_agent_service().shutdown(), timeout=30.0)
-            logger.info("AgentService shutdown completed successfully")
+            logger.info("✅ AgentService shutdown completed successfully")
         except asyncio.TimeoutError:
-            logger.warning("AgentService shutdown timed out after 30 seconds")
+            logger.warning("⚠️ AgentService shutdown timed out after 30 seconds")
         except Exception as e:
-            logger.error(f"Error during AgentService cleanup: {str(e)}")
+            logger.error(f"❌ Error during AgentService cleanup: {str(e)}")
+        
+        logger.info("="*80)
+        logger.info("👋 Shutdown complete. Goodbye!")
+        logger.info("="*80)
 
 app = FastAPI(title="Manus AI Agent", lifespan=lifespan)
 
