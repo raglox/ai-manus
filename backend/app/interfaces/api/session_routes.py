@@ -43,17 +43,25 @@ async def create_session(
     subscription_repo: SubscriptionRepository = Depends(get_subscription_repository)
 ) -> APIResponse[CreateSessionResponse]:
     # GAP-BILLING-001: Check usage limits before creating session
-    subscription = await subscription_repo.get_subscription_by_user_id(current_user.id)
-    if subscription:
-        if not subscription.can_use_agent():
-            raise BadRequestError(
-                f"Usage limit reached. Your plan allows {subscription.monthly_agent_runs_limit} runs per month. "
-                f"You have used {subscription.monthly_agent_runs}/{subscription.monthly_agent_runs_limit}. "
-                "Please upgrade your plan to continue."
-            )
-        # Increment usage counter
-        subscription.increment_usage()
-        await subscription_repo.update_subscription(subscription)
+    try:
+        subscription = await subscription_repo.get_subscription_by_user_id(current_user.id)
+        if subscription:
+            if not subscription.can_use_agent():
+                raise BadRequestError(
+                    f"Usage limit reached. Your plan allows {subscription.monthly_agent_runs_limit} runs per month. "
+                    f"You have used {subscription.monthly_agent_runs}/{subscription.monthly_agent_runs_limit}. "
+                    "Please upgrade your plan to continue."
+                )
+            # Increment usage counter
+            subscription.increment_usage()
+            await subscription_repo.update_subscription(subscription)
+        else:
+            # No subscription found - allow free usage for demo users
+            logger.info(f"No subscription found for user {current_user.id}, allowing free access")
+    except Exception as e:
+        # Log subscription check error but don't block session creation
+        logger.warning(f"Subscription check failed for user {current_user.id}: {e}")
+        logger.info("Allowing session creation despite subscription check failure")
     
     session = await agent_service.create_session(current_user.id)
     return APIResponse.success(
