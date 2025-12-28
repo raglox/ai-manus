@@ -91,9 +91,13 @@ class Settings(BaseSettings):
         
     def validate(self):
         """Validate configuration settings"""
-        # Critical secrets validation
-        if not self.api_key:
-            raise ValueError("API key is required")
+        # Critical secrets validation - check based on LLM provider
+        if self.llm_provider == "blackbox":
+            if not self.blackbox_api_key:
+                raise ValueError("Blackbox API key is required when using blackbox provider")
+        elif not self.api_key:
+            # For deepseek/openai/other providers
+            raise ValueError(f"API key is required for provider: {self.llm_provider}")
         
         if not self.jwt_secret_key or self.jwt_secret_key == "your-secret-key-here":
             raise ValueError("JWT_SECRET_KEY must be set in environment variables. Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))'")
