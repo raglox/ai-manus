@@ -20,7 +20,7 @@ from app.infrastructure.external.cache import get_cache
 
 # Import all required dependencies for agent service
 from app.infrastructure.external.llm.factory import get_llm_client
-from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+from app.infrastructure.external.sandbox.factory import get_sandbox
 from app.infrastructure.external.task.redis_task import RedisStreamTask
 from app.infrastructure.utils.llm_json_parser import LLMJsonParser
 from app.infrastructure.repositories.mongo_agent_repository import MongoAgentRepository
@@ -51,7 +51,11 @@ def get_agent_service() -> AgentService:
     llm = get_llm_client()
     agent_repository = MongoAgentRepository()
     session_repository = MongoSessionRepository()
-    sandbox_cls = DockerSandbox
+    
+    # Get sandbox class from factory (supports feature flag switching)
+    sandbox_cls = get_sandbox()
+    logger.info(f"Using sandbox implementation: {sandbox_cls.__name__}")
+    
     task_cls = RedisStreamTask
     json_parser = LLMJsonParser()
     file_storage = get_file_storage()

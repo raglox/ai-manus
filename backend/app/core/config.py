@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     sandbox_http_proxy: str | None = None
     sandbox_no_proxy: str | None = None
     
+    # Cloud Run Jobs Sandbox configuration
+    use_cloudrun_jobs_sandbox: bool = False  # Feature flag (default: False for safety)
+    sandbox_gcp_project: str = ""  # GCP project ID for Cloud Run Jobs
+    sandbox_gcp_region: str = "us-central1"  # GCP region for job execution
+    sandbox_gcs_bucket: str = "manus-sandbox-state"  # Cloud Storage bucket for session state
+    
     # Search engine configuration
     search_provider: str | None = "bing"  # "baidu", "google", "bing"
     google_search_api_key: str | None = None
