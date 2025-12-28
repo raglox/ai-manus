@@ -2,17 +2,20 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install curl
-RUN apt-get update && apt-get install -y curl
+# Install curl and other system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install uv
+# Install Node.js (if needed for frontend dependencies)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install uv
+# Install uv package manager
 RUN pip install uv
 
-# Configure uv to use Aliyun mirror
+# Configure uv to use Aliyun mirror for faster downloads
 ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 # Install dependencies
@@ -23,13 +26,18 @@ RUN uv pip install --system --no-cache -r requirements.txt
 COPY . .
 
 # Set script execution permissions
-RUN chmod +x run.sh
+RUN chmod +x run.sh check_connections.py
 
 # Set environment variables
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 # Expose port
 EXPOSE 8000
+
+# Add health check (for Docker and Cloud Run)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
 # Start command
 CMD ["./run.sh"] 
