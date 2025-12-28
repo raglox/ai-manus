@@ -302,10 +302,10 @@ class TestCloudRunJobsSandbox:
     def mock_settings(self):
         """Mock settings"""
         settings = Mock()
-        settings.gcp_project_id = "test-project"
-        settings.gcp_region = "us-central1"
+        settings.sandbox_gcp_project = "test-project"
+        settings.sandbox_gcp_region = "us-central1"
         settings.sandbox_executor_image = "gcr.io/test/executor:latest"
-        settings.sandbox_state_bucket = "test-bucket"
+        settings.sandbox_gcs_bucket = "test-bucket"
         return settings
     
     @pytest.fixture
@@ -585,13 +585,13 @@ class TestCloudRunJobsSandbox:
     async def test_create_classmethod_missing_project_id(self):
         """Test create method with missing project ID"""
         mock_settings = Mock()
-        mock_settings.gcp_project_id = None
+        mock_settings.sandbox_gcp_project = None
         
         with patch('app.infrastructure.external.sandbox.cloudrun_jobs_sandbox.get_settings', return_value=mock_settings):
             with pytest.raises(ValueError) as exc_info:
                 await CloudRunJobsSandbox.create()
             
-            assert "GCP_PROJECT_ID" in str(exc_info.value)
+            assert "SANDBOX_GCP_PROJECT" in str(exc_info.value)
     
     @pytest.mark.asyncio
     async def test_list_background_processes(self, sandbox):
@@ -660,10 +660,10 @@ class TestIntegration:
     async def test_full_execution_flow(self):
         """Test complete execution flow from start to finish"""
         mock_settings = Mock()
-        mock_settings.gcp_project_id = "test-project"
-        mock_settings.gcp_region = "us-central1"
+        mock_settings.sandbox_gcp_project = "test-project"
+        mock_settings.sandbox_gcp_region = "us-central1"
         mock_settings.sandbox_executor_image = "gcr.io/test/executor:latest"
-        mock_settings.sandbox_state_bucket = "test-bucket"
+        mock_settings.sandbox_gcs_bucket = "test-bucket"
         
         with patch('app.infrastructure.external.sandbox.cloudrun_jobs_sandbox.storage.Client'), \
              patch('app.infrastructure.external.sandbox.cloudrun_jobs_sandbox.run_v2'), \

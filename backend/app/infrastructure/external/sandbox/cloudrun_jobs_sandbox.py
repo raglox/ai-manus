@@ -1158,13 +1158,13 @@ class CloudRunJobsSandbox(Sandbox):
         settings = get_settings()
         
         # Get configuration from settings
-        project_id = settings.gcp_project_id
-        region = getattr(settings, 'gcp_region', 'us-central1')
+        project_id = settings.sandbox_gcp_project
+        region = settings.sandbox_gcp_region
         executor_image = getattr(settings, 'sandbox_executor_image', None)
-        state_bucket = getattr(settings, 'sandbox_state_bucket', None)
+        state_bucket = settings.sandbox_gcs_bucket
         
         if not project_id:
-            raise ValueError("GCP_PROJECT_ID must be configured for CloudRunJobsSandbox")
+            raise ValueError("SANDBOX_GCP_PROJECT must be configured for CloudRunJobsSandbox")
         
         sandbox = cls(
             project_id=project_id,
