@@ -317,3 +317,53 @@ async def debug_redis():
         result["traceback"] = traceback.format_exc()
     
     return result
+
+
+@router.get("/debug/beanie")
+async def debug_beanie():
+    """
+    Debug endpoint to check Beanie initialization status
+    """
+    try:
+        from app.infrastructure.storage.mongodb import get_mongodb
+        mongodb = get_mongodb()
+        
+        response = {
+            "mongodb_client_exists": mongodb._client is not None,
+            "beanie_initialized": mongodb.is_beanie_initialized,
+            "status": "unknown"
+        }
+        
+        # Try to initialize if needed
+        if not mongodb.is_beanie_initialized:
+            try:
+                await mongodb.initialize(max_retries=1, retry_delay=1.0)
+                response["initialization_attempted"] = True
+                response["beanie_initialized"] = mongodb.is_beanie_initialized
+                response["status"] = "initialized" if mongodb.is_beanie_initialized else "failed"
+            except Exception as init_error:
+                response["initialization_error"] = str(init_error)
+                response["status"] = "error"
+        else:
+            response["status"] = "already_initialized"
+        
+        # Try to use Beanie
+        try:
+            from app.infrastructure.models.documents import UserDocument
+            count = await UserDocument.count()
+            response["user_count"] = count
+            response["beanie_working"] = True
+        except Exception as beanie_error:
+            response["beanie_error"] = str(beanie_error)
+            response["beanie_working"] = False
+        
+        return response
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        }
