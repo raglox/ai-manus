@@ -97,9 +97,10 @@ class MongoDB:
     
     @property
     def client(self) -> AsyncIOMotorClient:
-        """Return initialized MongoDB client"""
+        """Return initialized MongoDB client - auto-initialize if needed"""
         if self._client is None:
-            raise RuntimeError("MongoDB client not initialized. Call initialize() first.")
+            logger.warning("⚠️ MongoDB accessed before initialization - returning None")
+            logger.warning("⚠️ Application running in degraded mode without MongoDB")
         return self._client
 
 

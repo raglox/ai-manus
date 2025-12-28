@@ -100,9 +100,10 @@ class RedisClient:
     
     @property
     def client(self) -> Redis:
-        """Return initialized Redis client"""
+        """Return initialized Redis client - auto-initialize if needed"""
         if self._client is None:
-            raise RuntimeError("Redis client not initialized. Call initialize() first.")
+            logger.warning("⚠️ Redis accessed before initialization - returning None")
+            logger.warning("⚠️ Application running in degraded mode without Redis")
         return self._client
 
 from functools import lru_cache

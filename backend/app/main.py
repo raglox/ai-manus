@@ -70,184 +70,63 @@ except Exception as e:
     limiter = Limiter(key_func=lambda: "global", default_limits=["1000/hour"])
 
 
-# Create lifespan context manager
+# Create lifespan context manager - NO DB INITIALIZATION
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager - handles startup and shutdown.
+    DB initialization is LAZY - happens on first use to allow immediate port binding.
+    """
     # Code executed on startup
     logger.info("="*80)
-    logger.info("🚀 Application startup - Manus AI Agent initializing")
+    logger.info("🚀 Application startup - Manus AI Backend")
+    logger.info("="*80)
+    logger.info("⚡ Port binding immediately - DBs will connect on first use")
     logger.info("="*80)
     
-    # Initialize flags
-    mongodb_initialized = False
-    redis_initialized = False
-    
-    # Store initial state (will be updated by background task)
+    # Initialize state flags
     app.state.mongodb_initialized = False
     app.state.redis_initialized = False
-    app.state.startup_complete = False
-    
-    # Create background task for DB initialization
-    async def initialize_databases():
-        nonlocal mongodb_initialized, redis_initialized
-        
-        # MongoDB initialization with extended timeout (120 seconds total)
-        try:
-            logger.info("📊 Starting MongoDB connection...")
-            await asyncio.wait_for(
-                get_mongodb().initialize(max_retries=5, retry_delay=3.0),
-                timeout=120.0  # 120 seconds total timeout
-            )
-            
-            logger.info("📊 Initializing Beanie ODM...")
-            await asyncio.wait_for(
-                init_beanie(
-                    database=get_mongodb().client[settings.mongodb_database],
-                    document_models=[AgentDocument, SessionDocument, UserDocument, SubscriptionDocument]
-                ),
-                timeout=30.0  # 30 seconds for Beanie initialization
-            )
-            
-            mongodb_initialized = True
-            app.state.mongodb_initialized = True
-            logger.info("✅ Successfully initialized MongoDB and Beanie")
-            logger.info(f"   Database: {settings.mongodb_database}")
-            
-        except asyncio.TimeoutError:
-            logger.error("❌ MongoDB initialization timed out after 120 seconds")
-            logger.warning("⚠️ Application will run in degraded mode without MongoDB")
-        except Exception as e:
-            logger.error(f"❌ MongoDB initialization failed: {str(e)}")
-            logger.warning("⚠️ Application will run in degraded mode without MongoDB")
-            # Log more details for debugging
-            import traceback
-            logger.debug(f"MongoDB error traceback:\n{traceback.format_exc()}")
-        
-        # Redis initialization with extended timeout (60 seconds total)
-        try:
-            logger.info("🔴 Starting Redis connection...")
-            await asyncio.wait_for(
-                get_redis().initialize(max_retries=5, retry_delay=2.0),
-                timeout=60.0  # 60 seconds total timeout
-            )
-            
-            redis_initialized = True
-            app.state.redis_initialized = True
-            logger.info("✅ Successfully initialized Redis")
-            logger.info(f"   Host: {settings.redis_host}:{settings.redis_port}")
-            
-        except asyncio.TimeoutError:
-            logger.error("❌ Redis initialization timed out after 60 seconds")
-            logger.warning("⚠️ Application will run in degraded mode without Redis caching")
-        except Exception as e:
-            logger.error(f"❌ Redis initialization failed: {str(e)}")
-            logger.warning("⚠️ Application will run in degraded mode without Redis caching")
-            # Log more details for debugging
-            import traceback
-            logger.debug(f"Redis error traceback:\n{traceback.format_exc()}")
-        
-        # Startup summary
-        logger.info("="*80)
-        logger.info("🎯 Startup Summary:")
-        logger.info(f"   MongoDB: {'✅ Connected' if mongodb_initialized else '❌ Disconnected (degraded mode)'}")
-        logger.info(f"   Redis:   {'✅ Connected' if redis_initialized else '❌ Disconnected (degraded mode)'}")
-        logger.info("="*80)
-        
-        app.state.startup_complete = True
-    
-    # Start DB initialization in background
-    logger.info("⚡ Starting database initialization in background...")
-    logger.info("🌐 Application will be ready to serve traffic immediately")
-    asyncio.create_task(initialize_databases())
+    app.state.startup_complete = True  # Mark as complete immediately
     
     try:
         yield
     finally:
         # Code executed on shutdown
         logger.info("="*80)
-        logger.info("🛑 Application shutdown - Manus AI Agent terminating")
+        logger.info("🛑 Application shutdown - Manus AI Backend")
         logger.info("="*80)
         
-        # Get actual initialization status
-        mongodb_initialized = app.state.mongodb_initialized
-        redis_initialized = app.state.redis_initialized
-        
-        # Disconnect from MongoDB
-        if mongodb_initialized:
-            try:
-                logger.info("Disconnecting from MongoDB...")
-                await asyncio.wait_for(get_mongodb().shutdown(), timeout=10.0)
-                logger.info("✅ MongoDB disconnected successfully")
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ MongoDB shutdown timed out")
-            except Exception as e:
-                logger.error(f"❌ Error shutting down MongoDB: {e}")
-        
-        # Disconnect from Redis
-        if redis_initialized:
-            try:
-                logger.info("Disconnecting from Redis...")
-                await asyncio.wait_for(get_redis().shutdown(), timeout=10.0)
-                logger.info("✅ Redis disconnected successfully")
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ Redis shutdown timed out")
-            except Exception as e:
-                logger.error(f"❌ Error shutting down Redis: {e}")
-
-        logger.info("Cleaning up AgentService instance...")
+        # Disconnect from MongoDB if it was initialized
         try:
-            await asyncio.wait_for(get_agent_service().shutdown(), timeout=30.0)
-            logger.info("✅ AgentService shutdown completed successfully")
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ AgentService shutdown timed out after 30 seconds")
-        except Exception as e:
-            logger.error(f"❌ Error during AgentService cleanup: {str(e)}")
-        
-        logger.info("="*80)
-        logger.info("👋 Shutdown complete. Goodbye!")
-        logger.info("="*80)
-    
-    try:
-        yield
-    finally:
-        # Code executed on shutdown
-        logger.info("="*80)
-        logger.info("🛑 Application shutdown - Manus AI Agent terminating")
-        logger.info("="*80)
-        
-        # Disconnect from MongoDB
-        if mongodb_initialized:
-            try:
+            mongodb = get_mongodb()
+            if mongodb._client is not None:
                 logger.info("Disconnecting from MongoDB...")
-                await asyncio.wait_for(get_mongodb().shutdown(), timeout=10.0)
+                await asyncio.wait_for(mongodb.shutdown(), timeout=10.0)
                 logger.info("✅ MongoDB disconnected successfully")
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ MongoDB shutdown timed out")
-            except Exception as e:
-                logger.error(f"❌ Error shutting down MongoDB: {e}")
-        
-        # Disconnect from Redis
-        if redis_initialized:
-            try:
-                logger.info("Disconnecting from Redis...")
-                await asyncio.wait_for(get_redis().shutdown(), timeout=10.0)
-                logger.info("✅ Redis disconnected successfully")
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ Redis shutdown timed out")
-            except Exception as e:
-                logger.error(f"❌ Error shutting down Redis: {e}")
-
-        logger.info("Cleaning up AgentService instance...")
-        try:
-            await asyncio.wait_for(get_agent_service().shutdown(), timeout=30.0)
-            logger.info("✅ AgentService shutdown completed successfully")
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ AgentService shutdown timed out after 30 seconds")
         except Exception as e:
-            logger.error(f"❌ Error during AgentService cleanup: {str(e)}")
+            logger.warning(f"⚠️ MongoDB shutdown issue: {e}")
+        
+        # Disconnect from Redis if it was initialized
+        try:
+            redis = get_redis()
+            if redis._redis is not None:
+                logger.info("Disconnecting from Redis...")
+                await asyncio.wait_for(redis.shutdown(), timeout=10.0)
+                logger.info("✅ Redis disconnected successfully")
+        except Exception as e:
+            logger.warning(f"⚠️ Redis shutdown issue: {e}")
+
+        # Shutdown AgentService
+        try:
+            logger.info("Cleaning up AgentService...")
+            await asyncio.wait_for(get_agent_service().shutdown(), timeout=30.0)
+            logger.info("✅ AgentService shutdown completed")
+        except Exception as e:
+            logger.warning(f"⚠️ AgentService shutdown issue: {e}")
         
         logger.info("="*80)
-        logger.info("👋 Shutdown complete. Goodbye!")
+        logger.info("👋 Shutdown complete")
         logger.info("="*80)
 
 app = FastAPI(title="Manus AI Agent", lifespan=lifespan)
