@@ -42,9 +42,14 @@ services:
     env_file:
       - .env
     # Expose backend port for direct access (optional)
+<<<<<<< HEAD
     # Port 8002 used to avoid conflicts
     ports:
       - "8002:8000"
+=======
+    ports:
+      - "8000:8000"
+>>>>>>> ba8137c4711645a40d3a01c6ce2fcbc2e7fd8136
 
   sandbox:
     # For sandbox, we can use the original image (no changes needed)
