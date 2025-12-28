@@ -15,9 +15,12 @@ echo ""
 echo "⚡ Starting FastAPI (DBs will initialize in background)..."
 echo "==========================================="
 
+# Convert LOG_LEVEL to lowercase for uvicorn
+LOG_LEVEL_LOWER=$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')
+
 # Start uvicorn immediately - no pre-checks!
 exec uvicorn app.main:app \
     --host 0.0.0.0 \
     --port ${PORT:-8000} \
     --timeout-graceful-shutdown 5 \
-    --log-level ${LOG_LEVEL:-info}
+    --log-level ${LOG_LEVEL_LOWER}
